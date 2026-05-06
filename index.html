@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#0a0a0a" />
+  <title>Beam — Videos an den TV casten</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,400;1,9..144,600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0a0a0a;
+      --bg-elev: #131313;
+      --bg-card: #181818;
+      --line: rgba(255,255,255,0.08);
+      --line-strong: rgba(255,255,255,0.16);
+      --text: #f5f1ea;
+      --text-dim: #a39d93;
+      --text-faint: #6b665e;
+      --accent: #ff6b35;
+      --accent-soft: rgba(255,107,53,0.12);
+      --accent-glow: rgba(255,107,53,0.4);
+      --serif: "Fraunces", Georgia, serif;
+      --sans: "Manrope", -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+```
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-weight: 400;
+  line-height: 1.5;
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background:
+    radial-gradient(ellipse 80% 60% at 50% -10%, rgba(255,107,53,0.18), transparent 60%),
+    radial-gradient(ellipse 60% 40% at 90% 100%, rgba(255,107,53,0.08), transparent 50%),
+    var(--bg);
+  padding: max(env(safe-area-inset-top), 24px) 20px max(env(safe-area-inset-bottom), 32px);
+  position: relative;
+}
+
+/* Filmische Grain-Textur */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.04;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  z-index: 1;
+}
+
+.container {
+  max-width: 720px;
+  margin: 0 auto;
+  position: relative;
+  z-index: 2;
+}
+
+/* HEADER */
+.header { padding: 20px 0 36px; }
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 28px;
+}
+.brand-dot {
+  width: 8px; height: 8px;
+  background: var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 12px var(--accent-glow);
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(0.85); }
+}
+h1 {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: clamp(38px, 9vw, 56px);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  margin-bottom: 16px;
+}
+h1 em {
+  font-style: italic;
+  color: var(--accent);
+  font-weight: 400;
+}
+.lede {
+  font-size: 16px;
+  color: var(--text-dim);
+  max-width: 480px;
+  line-height: 1.5;
+}
+
+/* TABS */
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  margin-bottom: 16px;
+}
+.tab {
+  flex: 1;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-family: var(--sans);
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.tab.active {
+  background: var(--bg-card);
+  color: var(--text);
+  box-shadow: 0 1px 0 var(--line-strong);
+}
+
+/* INPUT-KARTEN */
+.input-card {
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+.panel { display: none; }
+.panel.active { display: block; }
+
+/* DATEI-PICKER */
+.file-drop {
+  border: 1.5px dashed var(--line-strong);
+  border-radius: 14px;
+  padding: 36px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  background: rgba(255,255,255,0.01);
+}
+.file-drop:hover, .file-drop:active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.file-drop-icon {
+  width: 48px; height: 48px;
+  margin: 0 auto 14px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+.file-drop-title {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 22px;
+  margin-bottom: 4px;
+}
+.file-drop-sub {
+  color: var(--text-faint);
+  font-size: 13px;
+}
+#fileInput { display: none; }
+
+/* URL-INPUT */
+.url-row { display: flex; gap: 8px; }
+.url-input {
+  flex: 1;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 15px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.url-input::placeholder { color: var(--text-faint); }
+.url-input:focus { border-color: var(--accent); }
+.url-btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  padding: 0 22px;
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  transition: transform 0.1s, opacity 0.2s;
+}
+.url-btn:active { transform: scale(0.96); }
+.url-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* PLAYER */
+.player-wrap {
+  position: relative;
+  background: #000;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  margin-bottom: 16px;
+}
+.player-wrap.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-elev);
+}
+.player-wrap.empty::before {
+  content: "Noch kein Video geladen";
+  color: var(--text-faint);
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 18px;
+}
+video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: #000;
+}
+video.hidden { display: none; }
+
+/* AIRPLAY-BUTTON */
+.airplay-btn {
+  width: 100%;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 16px;
+  padding: 18px 24px;
+  font-family: var(--sans);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  transition: transform 0.1s, box-shadow 0.2s, opacity 0.2s;
+  box-shadow: 0 4px 24px var(--accent-glow);
+  margin-bottom: 12px;
+}
+.airplay-btn:active { transform: scale(0.98); }
+.airplay-btn:disabled {
+  background: var(--bg-elev);
+  color: var(--text-faint);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+.airplay-btn svg { width: 22px; height: 22px; }
+
+.status {
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-faint);
+  margin-bottom: 32px;
+  min-height: 18px;
+}
+.status.ok { color: var(--accent); }
+
+/* ANLEITUNG */
+.guide {
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+.guide-title {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 22px;
+  margin-bottom: 16px;
+  letter-spacing: -0.01em;
+}
+.steps { list-style: none; counter-reset: step; }
+.steps li {
+  counter-increment: step;
+  padding: 14px 0 14px 44px;
+  position: relative;
+  border-top: 1px solid var(--line);
+  font-size: 14.5px;
+  color: var(--text-dim);
+  line-height: 1.55;
+}
+.steps li:first-child { border-top: none; padding-top: 4px; }
+.steps li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 14px;
+  width: 28px; height: 28px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--serif);
+  font-weight: 600;
+  font-size: 13px;
+}
+.steps li:first-child::before { top: 4px; }
+.steps strong { color: var(--text); font-weight: 600; }
+
+.footer {
+  text-align: center;
+  padding: 20px 0 8px;
+  font-size: 12px;
+  color: var(--text-faint);
+  letter-spacing: 0.05em;
+}
+.footer em { font-family: var(--serif); font-style: italic; color: var(--text-dim); }
+```
+
+  </style>
+</head>
+<body>
+  <div class="container">
+
+```
+<header class="header">
+  <div class="brand">
+    <span class="brand-dot"></span>
+    <span>Beam · v1</span>
+  </div>
+  <h1>Vom iPhone <em>auf den Fernseher</em>.</h1>
+  <p class="lede">Wähle ein lokales Video oder gib eine URL ein. Mit einem Tipp landet's via AirPlay direkt auf deinem TV.</p>
+</header>
+
+<div class="tabs" role="tablist">
+  <button class="tab active" data-panel="file" role="tab">Aus Dateien</button>
+  <button class="tab" data-panel="url" role="tab">Per URL</button>
+</div>
+
+<div class="input-card">
+  <!-- DATEI-PANEL -->
+  <div class="panel active" data-panel="file">
+    <label class="file-drop" for="fileInput">
+      <div class="file-drop-icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 5v14M5 12l7-7 7 7"/>
+        </svg>
+      </div>
+      <div class="file-drop-title">Video auswählen</div>
+      <div class="file-drop-sub">aus Fotos oder Dateien · MP4, MOV, M4V</div>
+    </label>
+    <input type="file" id="fileInput" accept="video/*" />
+  </div>
+
+  <!-- URL-PANEL -->
+  <div class="panel" data-panel="url">
+    <div class="url-row">
+      <input type="url" class="url-input" id="urlInput" placeholder="https://… (mp4, m3u8 …)" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false" />
+      <button class="url-btn" id="urlBtn">Laden</button>
+    </div>
+  </div>
+</div>
+
+<div class="player-wrap empty" id="playerWrap">
+  <video
+    id="video"
+    class="hidden"
+    controls
+    playsinline
+    webkit-playsinline
+    x-webkit-airplay="allow"
+    crossorigin="anonymous"
+  ></video>
+</div>
+
+<button class="airplay-btn" id="airPlayBtn" disabled>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1"/>
+    <polygon points="12 15 17 21 7 21 12 15" fill="currentColor"/>
+  </svg>
+  An TV senden
+</button>
+<div class="status" id="status">Lade ein Video, um AirPlay zu starten.</div>
+
+<section class="guide">
+  <div class="guide-title">So funktioniert's</div>
+  <ol class="steps">
+    <li>Stelle sicher, dass dein <strong>iPhone und der Fernseher im selben WLAN</strong> sind (Apple TV oder AirPlay 2 fähiges Smart TV).</li>
+    <li>Lade ein Video — entweder aus deinen <strong>Dateien/Fotos</strong> oder über eine <strong>direkte Video-URL</strong> (z. B. .mp4 oder .m3u8).</li>
+    <li>Tippe auf <strong>„An TV senden"</strong> oder das AirPlay-Symbol in der Player-Steuerung und wähle dein Gerät.</li>
+    <li>Lehn dich zurück. Pause/Play funktioniert weiterhin auf dem iPhone.</li>
+  </ol>
+</section>
+
+<div class="footer">
+  <em>nur AirPlay · Chromecast wird auf iOS Safari nicht unterstützt</em>
+</div>
+```
+
+  </div>
+
+  <script>
+    const fileInput = document.getElementById('fileInput');
+    const urlInput = document.getElementById('urlInput');
+    const urlBtn = document.getElementById('urlBtn');
+    const video = document.getElementById('video');
+    const playerWrap = document.getElementById('playerWrap');
+    const airPlayBtn = document.getElementById('airPlayBtn');
+    const statusEl = document.getElementById('status');
+    const tabs = document.querySelectorAll('.tab');
+    const panels = document.querySelectorAll('.panel');
+
+    // Tab-Wechsel
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        const target = tab.dataset.panel;
+        tabs.forEach(t => t.classList.toggle('active', t === tab));
+        panels.forEach(p => p.classList.toggle('active', p.dataset.panel === target));
+      });
+    });
+
+    let currentObjectURL = null;
+
+    function setStatus(msg, ok = false) {
+      statusEl.textContent = msg;
+      statusEl.classList.toggle('ok', ok);
+    }
+
+    function loadSource(src) {
+      // Alte Object-URL aufräumen
+      if (currentObjectURL) {
+        URL.revokeObjectURL(currentObjectURL);
+        currentObjectURL = null;
+      }
+      video.src = src;
+      video.classList.remove('hidden');
+      playerWrap.classList.remove('empty');
+      video.load();
+      video.play().catch(() => {/* Autoplay kann blockiert sein, ignorieren */});
+      setStatus('Video geladen — bereit zum Casten.', true);
+    }
+
+    // Datei-Auswahl
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      currentObjectURL = URL.createObjectURL(file);
+      loadSource(currentObjectURL);
+    });
+
+    // URL laden
+    function submitUrl() {
+      const url = urlInput.value.trim();
+      if (!url) return;
+      try {
+        new URL(url);
+      } catch {
+        setStatus('Bitte eine gültige URL eingeben.');
+        return;
+      }
+      loadSource(url);
+    }
+    urlBtn.addEventListener('click', submitUrl);
+    urlInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') submitUrl();
+    });
+
+    // ───── AirPlay-Detection & Trigger ─────
+    // Bevorzugt: WebKit-spezifische API (zuverlässig in iOS Safari)
+    const hasWebKitAirPlay =
+      typeof video.webkitShowPlaybackTargetPicker === 'function' &&
+      'WebKitPlaybackTargetAvailabilityEvent' in window;
+
+    if (hasWebKitAirPlay) {
+      video.addEventListener('webkitplaybacktargetavailabilitychanged', (e) => {
+        if (e.availability === 'available') {
+          airPlayBtn.disabled = false;
+          if (!video.src) {
+            setStatus('AirPlay-Gerät erkannt. Lade jetzt ein Video.');
+          } else {
+            setStatus('AirPlay-Gerät bereit. Tippe „An TV senden".', true);
+          }
+        } else {
+          airPlayBtn.disabled = !video.src ? true : true;
+          setStatus('Kein AirPlay-Gerät in der Nähe gefunden.');
+        }
+      });
+
+      airPlayBtn.addEventListener('click', () => {
+        if (!video.src) {
+          setStatus('Bitte zuerst ein Video laden.');
+          return;
+        }
+        try {
+          video.webkitShowPlaybackTargetPicker();
+        } catch (err) {
+          setStatus('AirPlay-Auswahl konnte nicht geöffnet werden.');
+        }
+      });
+    }
+    // Fallback: Standard Remote Playback API
+    else if (video.remote && typeof video.remote.prompt === 'function') {
+      video.remote.watchAvailability((available) => {
+        airPlayBtn.disabled = !available || !video.src;
+        if (available) {
+          setStatus(video.src ? 'Casting-Gerät bereit.' : 'Casting-Gerät erkannt. Lade ein Video.', !!video.src);
+        } else {
+          setStatus('Kein Casting-Gerät gefunden.');
+        }
+      }).catch(() => {
+        setStatus('Casting wird auf diesem Gerät nicht unterstützt.');
+      });
+
+      airPlayBtn.addEventListener('click', () => {
+        if (!video.src) { setStatus('Bitte zuerst ein Video laden.'); return; }
+        video.remote.prompt().catch(() => {
+          setStatus('Auswahl abgebrochen oder fehlgeschlagen.');
+        });
+      });
+    }
+    // Kein Casting verfügbar
+    else {
+      airPlayBtn.disabled = true;
+      setStatus('AirPlay nur in Safari auf dem iPhone/iPad/Mac verfügbar.');
+    }
+
+    // Wenn ein Video geladen wurde, Button aktivieren (auch ohne Availability-Event)
+    video.addEventListener('loadedmetadata', () => {
+      if (hasWebKitAirPlay || (video.remote && typeof video.remote.prompt === 'function')) {
+        airPlayBtn.disabled = false;
+      }
+    });
+
+    // Fehlerbehandlung beim Laden
+    video.addEventListener('error', () => {
+      setStatus('Video konnte nicht geladen werden. Format oder URL prüfen.');
+    });
+  </script>
+
+</body>
+</html>
