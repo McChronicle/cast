@@ -11,7 +11,7 @@ Bei jedem PR die Version um 1 erhöhen — gleichzeitig an allen vier Stellen, s
 3. `sw.js` — `const CACHE = 'beam-shell-vN';` (zwingt SW-Cache-Invalidierung)
 4. `manifest.webmanifest` — `"version": "N"`
 
-Schema: einfacher monoton steigender Integer. Kein Semver, kein Datum. Aktuell **v5**.
+Schema: einfacher monoton steigender Integer. Kein Semver, kein Datum. Aktuell **v6**.
 
 In der PR-Beschreibung den Versions-Bump erwähnen, damit der GitHub-Pages-Deployment-Status nachvollziehbar bleibt.
 
@@ -24,8 +24,8 @@ In der PR-Beschreibung den Versions-Bump erwähnen, damit der GitHub-Pages-Deplo
 - `icon.svg` — App-Icon
 
 Externe Libs werden via CDN nachgeladen (lazy beim Klick), nicht eingecheckt:
-- WebTorrent: `cdn.jsdelivr.net/npm/webtorrent@…/webtorrent.min.js`
-- PeerJS: `unpkg.com/peerjs@…/dist/peerjs.min.js`
+- WebTorrent (v1.9.7 UMD primär, v2.x ESM Fallback): jsdelivr/unpkg + esm.sh
+- trystero (Pairing über BitTorrent-Tracker, ESM): `esm.sh/trystero@…/torrent`
 - qrcode-generator: `cdn.jsdelivr.net/npm/qrcode-generator@…/qrcode.js`
 - HLS.js: `cdn.jsdelivr.net/npm/hls.js@…/dist/hls.min.js`
 
