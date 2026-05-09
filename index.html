@@ -802,7 +802,7 @@
     <header class="header">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · v16</span>
+        <span>Beam · v17</span>
       </div>
       <h1>Vom iPhone <em>auf den Fernseher</em>.</h1>
       <p class="lede">Wähle ein lokales Video oder gib eine URL ein. Mit einem Tipp landet's via AirPlay direkt auf deinem TV.</p>
@@ -1741,8 +1741,6 @@
         }
       }
 
-      setCastStatus('Bereit (Code ' + code + ') — warte auf TV…');
-
       const client = new window.WebTorrent();
       const ntfyBase = 'https://ntfy.sh/';
       const magnetTopic = 'beam-' + code.toLowerCase() + '-magnet';
@@ -1752,6 +1750,27 @@
       let magnetPostTimer = null;
       let sseOpen = false;
       let postOk = false;
+      let magnetReady = false;
+      let magnetPostCount = 0;
+      let stickyState = '';
+
+      function refreshStatus() {
+        if (stickyState === 'tv-playing') return;
+        if (magnetPostCount > 0 && tvSeen) {
+          setCastStatus('Magnet gesendet (' + magnetPostCount + ' Posts) — TV sollte gleich laden…', 'ok');
+        } else if (magnetReady && tvSeen) {
+          setCastStatus('TV verbunden, sende Magnet…', 'ok');
+        } else if (magnetReady) {
+          setCastStatus('Magnet bereit (' + magnetPostCount + ' Posts) — warte auf TV…');
+        } else if (tvSeen) {
+          setCastStatus('TV verbunden — Datei wird vorbereitet (Hashing)…', 'ok');
+        } else if (sseOpen) {
+          setCastStatus('Bereit (Code ' + code + ') — TV-Kanal offen, warte auf TV…');
+        } else {
+          setCastStatus('Bereit (Code ' + code + ') — warte auf TV…');
+        }
+      }
+      refreshStatus();
 
       const peerHintTimer = setTimeout(() => {
         if (tvSeen) return;
@@ -1771,7 +1790,7 @@
       const tvStatusSrc = new EventSource(ntfyBase + tvStatusTopic + '/sse?since=30s');
       tvStatusSrc.onopen = () => {
         sseOpen = true;
-        if (!tvSeen) setCastStatus('Bereit (Code ' + code + ') — TV-Kanal offen, warte auf TV…');
+        refreshStatus();
       };
       tvStatusSrc.onerror = () => {
         sseOpen = false;
@@ -1785,11 +1804,11 @@
           tvSeen = true;
           clearTimeout(peerHintTimer);
           const s = msg.state;
-          if (s === 'subscribed') setCastStatus('TV verbunden — Magnet wird übertragen…', 'ok');
-          else if (s === 'metadata') setCastStatus('TV hat Metadaten — beginnt zu laden…', 'ok');
-          else if (s === 'playing') setCastStatus('Spielt auf dem TV.', 'ok');
+          if (s === 'metadata') setCastStatus('TV hat Metadaten — beginnt zu laden…', 'ok');
+          else if (s === 'playing') { stickyState = 'tv-playing'; setCastStatus('Spielt auf dem TV.', 'ok'); }
           else if (s === 'buffering') setCastStatus('Puffert auf dem TV…', 'ok');
-          else if (s === 'error') setCastStatus('Fehler auf dem TV: ' + (msg.detail || ''), 'err');
+          else if (s === 'error') { stickyState = 'tv-error'; setCastStatus('Fehler auf dem TV: ' + (msg.detail || ''), 'err'); }
+          else refreshStatus();
         } catch {}
       };
 
@@ -1805,6 +1824,8 @@
       };
       client.seed(currentFile, opts, (torrent) => {
         castSession.torrent = torrent;
+        magnetReady = true;
+        refreshStatus();
         setCastMeta([
           ['Datei', currentFile.name],
           ['Größe', formatBytes(currentFile.size)],
@@ -1826,6 +1847,8 @@
             .then((r) => {
               if (r.ok) {
                 postOk = true;
+                magnetPostCount++;
+                refreshStatus();
               } else if (!postOk) {
                 setCastStatus('ntfy-POST fehlgeschlagen: HTTP ' + r.status, 'err');
               }

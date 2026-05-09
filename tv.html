@@ -357,7 +357,7 @@
     <div class="pair-card" id="pairCard">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · TV · v16</span>
+        <span>Beam · TV · v17</span>
       </div>
       <h1>Mit dem <em>iPhone</em> verbinden.</h1>
       <p class="lede">QR-Code mit der iPhone-Kamera scannen — Beam öffnet sich automatisch mit diesem TV verbunden.</p>
@@ -581,6 +581,8 @@
       let gotMagnet = false;
       let sseOpen = false;
       let postOk = false;
+      let sseEventCount = 0;
+      let magnetEventCount = 0;
 
       // Status zurück ans iPhone via ntfy.sh-POST
       function postStatus(state, detail) {
@@ -621,13 +623,18 @@
       };
 
       magnetSrc.onmessage = (ev) => {
+        sseEventCount++;
         try {
           const data = JSON.parse(ev.data);
           if (data.event !== 'message') return;
+          magnetEventCount++;
           const meta = JSON.parse(data.message);
           if (!meta || !meta.magnet || gotMagnet) return;
           // Nicht zu alte Magnete übernehmen (max. 10 min alt)
-          if (meta.ts && Date.now() - meta.ts > 10 * 60 * 1000) return;
+          if (meta.ts && Date.now() - meta.ts > 10 * 60 * 1000) {
+            setStatus('Veralteten Magnet ignoriert (älter als 10 min) — sende erneut vom iPhone.', 'err');
+            return;
+          }
           gotMagnet = true;
           clearInterval(subTimer);
           try { magnetSrc.close(); } catch {}
@@ -640,10 +647,11 @@
       setTimeout(() => {
         if (!gotMagnet && session && session.magnetSrc === magnetSrc) {
           const parts = [];
-          if (!sseOpen) parts.push('SSE-Kanal nicht offen');
-          if (!postOk) parts.push('POST scheiterte');
-          const diag = parts.length ? ' (' + parts.join(', ') + ')' : '';
-          setStatus('Kein Magnet in 60 s' + diag + '. iPhone Cast für Code ' + code + ' starten?', 'err');
+          parts.push('SSE ' + (sseOpen ? 'offen' : 'zu'));
+          parts.push(sseEventCount + ' Events');
+          parts.push(magnetEventCount + ' Magnete');
+          parts.push('POST ' + (postOk ? 'OK' : 'fehlgeschlagen'));
+          setStatus('Kein Magnet in 60 s [' + parts.join(', ') + ']. iPhone Cast für Code ' + code + ' gestartet?', 'err');
           pairBtn.disabled = false;
         }
       }, 60000);
