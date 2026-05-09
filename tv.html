@@ -357,7 +357,7 @@
     <div class="pair-card" id="pairCard">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · TV · v10</span>
+        <span>Beam · TV · v11</span>
       </div>
       <h1>Mit dem <em>iPhone</em> verbinden.</h1>
       <p class="lede">QR-Code mit der iPhone-Kamera scannen — Beam öffnet sich automatisch mit diesem TV verbunden.</p>
@@ -551,15 +551,17 @@
       return webTorrentLoadPromise;
     }
 
-    // trystero: Pairing über Nostr-Relays statt WebTorrent-Tracker.
-    // Tracker-Pool war zu fragmentiert, Peers fanden sich nicht.
+    // trystero: Pairing über MQTT (HiveMQ public broker). Nostr war zu
+    // asymmetrisch zwischen iPhone und TV. Ein gemeinsamer WSS-Broker
+    // garantiert, dass beide Seiten denselben Rendezvous-Punkt sehen.
     let trysteroLoadPromise = null;
     function loadTrystero(progress) {
       if (window.__trystero) return Promise.resolve(window.__trystero);
       if (trysteroLoadPromise) return trysteroLoadPromise;
       const sources = [
+        { name: 'mqtt@0.21.5',  fn: () => import('https://esm.sh/trystero@0.21.5/mqtt') },
+        { name: 'mqtt@0.20.0',  fn: () => import('https://esm.sh/trystero@0.20.0/mqtt') },
         { name: 'nostr@0.21.5', fn: () => import('https://esm.sh/trystero@0.21.5/nostr') },
-        { name: 'nostr@0.20.0', fn: () => import('https://esm.sh/trystero@0.20.0/nostr') },
       ];
       trysteroLoadPromise = (async () => {
         let lastErr;
@@ -639,10 +641,17 @@
         startTorrent(msg);
       });
 
-      // Hinweis nach 30 s, falls noch kein iPhone beigetreten ist
+      // Hinweis nach 30 s, falls noch kein iPhone beigetreten ist.
+      // getPeers() zeigt, ob Signaling überhaupt jemanden sieht
+      // (relays/broker erreicht, aber WebRTC-Handshake nicht durch).
       setTimeout(() => {
         if (!peerSeen && session && session.room === room) {
-          setStatus('Kein iPhone in 30 s. QR scannen oder Code abtippen.', 'err');
+          let peerCount = '?';
+          try {
+            const peers = room.getPeers ? room.getPeers() : null;
+            if (peers) peerCount = String(Object.keys(peers).length);
+          } catch {}
+          setStatus('Kein iPhone in 30 s (Signaling sieht ' + peerCount + ' Peers). QR scannen oder Code abtippen.', 'err');
           pairBtn.disabled = false;
         }
       }, 30000);
