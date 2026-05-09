@@ -357,7 +357,7 @@
     <div class="pair-card" id="pairCard">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · TV · v22</span>
+        <span>Beam · TV · v23</span>
       </div>
       <h1>Mit dem <em>iPhone</em> verbinden.</h1>
       <p class="lede">QR-Code mit der iPhone-Kamera scannen — Beam öffnet sich automatisch mit diesem TV verbunden.</p>
@@ -669,51 +669,19 @@
       }, 30000);
 
       function setupReceiver(dc) {
-        // State-Maschine: zuerst metadata (JSON-Text), dann optional init-segments
-        // (für fragmented MP4 via mp4box.js auf iPhone-Seite), dann media-segments
-        // oder rohe File-Chunks. Letzte Nachricht: { type: "done" }.
+        // Sammle Chunks, baue Blob und spiele ab. Funktioniert für alle
+        // Formate die das <video>-Element nativ kann. Größenlimit ~1-1.5 GB
+        // wegen TV-RAM.
         let metadata = null;
-        let mode = 'unknown'; // 'mse' | 'blob'
-        let mediaSource = null;
-        let sourceBuffer = null;
-        let bufferQueue = [];
-        let pendingSegmentMeta = null;
         let blobChunks = [];
         let videoElement = null;
-
-        function flushQueue() {
-          if (!sourceBuffer || sourceBuffer.updating) return;
-          if (bufferQueue.length > 0) {
-            try {
-              sourceBuffer.appendBuffer(bufferQueue.shift());
-            } catch (e) {
-              setStatus('SourceBuffer-Fehler: ' + (e.message || e), 'err');
-              reportStatus('error', String(e.message || e));
-            }
-          }
-        }
-
-        function appendToSourceBuffer(buf) {
-          if (!sourceBuffer) {
-            bufferQueue.push(buf);
-            return;
-          }
-          if (sourceBuffer.updating || bufferQueue.length > 0) {
-            bufferQueue.push(buf);
-          } else {
-            try {
-              sourceBuffer.appendBuffer(buf);
-            } catch (e) {
-              bufferQueue.push(buf);
-            }
-          }
-        }
+        let totalBytesLocal = 0;
 
         function buildVideoElement() {
           stage.style.display = 'none';
           player.classList.add('active');
           overlayName.textContent = (metadata && metadata.name) || 'Stream';
-          loadingText.textContent = 'Initialisiere Player…';
+          loadingText.textContent = 'Empfange Datei…';
           loadingProgress.textContent = '';
 
           videoMount.innerHTML = '';
@@ -751,48 +719,13 @@
           window.addEventListener('keydown', showOverlay);
         }
 
-        function setupMSE(mime) {
-          mediaSource = new MediaSource();
-          videoElement.src = URL.createObjectURL(mediaSource);
-          mediaSource.addEventListener('sourceopen', () => {
-            try {
-              sourceBuffer = mediaSource.addSourceBuffer(mime);
-              sourceBuffer.addEventListener('updateend', flushQueue);
-              flushQueue();
-            } catch (e) {
-              setStatus('MSE addSourceBuffer fehlgeschlagen für "' + mime + '" — schalte auf Blob-Fallback.', 'err');
-              fallbackToBlob();
-            }
-          });
-        }
-
-        function fallbackToBlob() {
-          mode = 'blob';
-          // Buffer-Queue + bisherige sourceBuffer-Inhalte zu blobChunks transferieren
-          mediaSource = null;
-          sourceBuffer = null;
-          for (const b of bufferQueue) blobChunks.push(b);
-          bufferQueue = [];
-        }
-
         function finalize() {
-          if (mode === 'mse' && mediaSource && mediaSource.readyState === 'open') {
-            // Auf updateend warten und dann endOfStream
-            const tryEnd = () => {
-              if (sourceBuffer && (sourceBuffer.updating || bufferQueue.length > 0)) {
-                setTimeout(tryEnd, 100);
-                return;
-              }
-              try { mediaSource.endOfStream(); } catch {}
-            };
-            tryEnd();
-          } else if (mode === 'blob') {
-            const blob = new Blob(blobChunks, { type: (metadata && metadata.mime) || 'video/mp4' });
-            const url = URL.createObjectURL(blob);
-            videoElement.src = url;
-            videoElement.play().catch(() => {});
-            blobChunks = [];
-          }
+          const blob = new Blob(blobChunks, { type: (metadata && metadata.mime) || 'video/mp4' });
+          const url = URL.createObjectURL(blob);
+          videoElement.src = url;
+          videoElement.play().catch(() => {});
+          // Chunks-Array freigeben — Blob hält die Daten
+          blobChunks = [];
         }
 
         dc.onmessage = (msg) => {
@@ -802,53 +735,31 @@
               if (obj.type === 'metadata') {
                 metadata = obj;
                 receivedMetadata = true;
-                totalBytes = obj.size || 0;
+                totalBytesLocal = obj.size || 0;
+                totalBytes = totalBytesLocal;
                 reportStatus('metadata');
                 buildVideoElement();
                 setStatus('Empfange Stream — 0%…', 'ok');
-              } else if (obj.type === 'init') {
-                // mp4box-Init-Segment kommt gleich als nächste binary message
-                pendingSegmentMeta = obj;
-                if (window.MediaSource && MediaSource.isTypeSupported(obj.mime)) {
-                  mode = 'mse';
-                  setupMSE(obj.mime);
-                } else {
-                  // MSE unterstützt diese MIME nicht — Blob-Fallback
-                  setStatus('MSE unterstützt "' + obj.mime + '" nicht — Blob-Fallback (RAM-intensiv).', 'err');
-                  fallbackToBlob();
-                }
-              } else if (obj.type === 'segment') {
-                pendingSegmentMeta = obj;
               } else if (obj.type === 'done') {
                 finalize();
               }
             } catch {}
           } else {
-            // Binary chunk
-            const buf = msg.data; // ArrayBuffer
+            // Binary chunk → in Blob-Buffer einsammeln
+            const buf = msg.data;
             bytesReceived += buf.byteLength;
-            if (mode === 'mse') {
-              appendToSourceBuffer(buf);
-            } else if (mode === 'blob') {
-              blobChunks.push(buf);
-            } else {
-              // Noch kein Mode bestimmt: sammle vorerst als Blob,
-              // entscheiden wir später beim ersten init oder done.
-              blobChunks.push(buf);
-            }
-            // Loading-Progress aktualisieren
-            if (loading.style.display !== 'none' && totalBytes) {
-              const pct = Math.round((bytesReceived / totalBytes) * 100);
-              loadingText.textContent = 'Empfange Stream…';
-              loadingProgress.textContent = pct + '% · ' + formatBytes(bytesReceived) + ' / ' + formatBytes(totalBytes);
+            blobChunks.push(buf);
+            if (loading && loading.style.display !== 'none' && totalBytesLocal) {
+              const pct = Math.round((bytesReceived / totalBytesLocal) * 100);
+              loadingText.textContent = 'Empfange Datei…';
+              loadingProgress.textContent = pct + '% · ' + formatBytes(bytesReceived) + ' / ' + formatBytes(totalBytesLocal);
             }
           }
         };
 
         dc.onclose = () => {
-          // Bei rohen Chunks (kein init) erst beim Schließen Blob bauen
-          if (mode === 'unknown' && blobChunks.length > 0) {
-            mode = 'blob';
+          // Falls iPhone schließt ohne 'done'-Nachricht: trotzdem versuchen abzuspielen
+          if (blobChunks.length > 0 && videoElement && !videoElement.src) {
             finalize();
           }
         };
