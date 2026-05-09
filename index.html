@@ -420,6 +420,36 @@
     .cast-btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .cast-btn svg { width: 18px; height: 18px; color: var(--accent); }
 
+    .tv-link-banner {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      background: var(--accent-soft);
+      border: 1px solid rgba(255,107,53,0.35);
+      border-radius: 14px;
+      padding: 14px 18px;
+      margin-bottom: 16px;
+    }
+    .tv-link-banner[hidden] { display: none; }
+    .tv-link-icon {
+      flex: 0 0 auto;
+      color: var(--accent);
+    }
+    .tv-link-text { font-size: 13.5px; line-height: 1.45; }
+    .tv-link-text strong { display: block; color: var(--text); font-weight: 600; margin-bottom: 2px; }
+    .tv-link-meta { color: var(--text-dim); }
+    .tv-link-meta code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      background: rgba(0,0,0,0.3);
+      padding: 1px 6px;
+      border-radius: 4px;
+      letter-spacing: 0.1em;
+      color: var(--accent);
+    }
+    .tv-link-meta em { font-family: var(--serif); font-style: italic; color: var(--text); }
+
+    .cast-host-only[hidden], .cast-guest-only[hidden] { display: none; }
+
     .modal-backdrop {
       position: fixed;
       inset: 0;
@@ -772,7 +802,7 @@
     <header class="header">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · v6</span>
+        <span>Beam · v7</span>
       </div>
       <h1>Vom iPhone <em>auf den Fernseher</em>.</h1>
       <p class="lede">Wähle ein lokales Video oder gib eine URL ein. Mit einem Tipp landet's via AirPlay direkt auf deinem TV.</p>
@@ -781,6 +811,20 @@
     <div class="tabs" role="tablist">
       <button class="tab active" data-panel="file" role="tab">Aus Dateien</button>
       <button class="tab" data-panel="url" role="tab">Per URL</button>
+    </div>
+
+    <div class="tv-link-banner" id="tvLinkBanner" hidden>
+      <div class="tv-link-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="3" width="20" height="14" rx="2"/>
+          <line x1="8" y1="21" x2="16" y2="21"/>
+          <line x1="12" y1="17" x2="12" y2="21"/>
+        </svg>
+      </div>
+      <div class="tv-link-text">
+        <strong>Mit TV verbunden</strong>
+        <span class="tv-link-meta">Code <code id="tvLinkCode">…</code> · wähle eine Datei und tippe auf <em>An TV senden</em>.</span>
+      </div>
     </div>
 
     <div class="input-card">
@@ -898,22 +942,33 @@
         <button class="modal-close" id="castClose" aria-label="Schließen">×</button>
       </div>
       <div class="modal-body">
-        <div class="modal-step">
-          <strong>1.</strong> Auf dem TV den <strong>Internet-Browser</strong> öffnen und diese Adresse aufrufen:
+        <div class="cast-host-only" id="castHostBlock">
+          <div class="modal-step">
+            <strong>1.</strong> Auf dem TV den <strong>Internet-Browser</strong> öffnen und diese Adresse aufrufen:
+          </div>
+          <div class="url-display">
+            <span id="castUrl">…</span>
+            <button id="castUrlCopy">Kopieren</button>
+          </div>
+          <div class="modal-step">
+            <strong>2.</strong> Code eingeben oder die URL bereits mit Code verwenden:
+          </div>
+          <div class="code-display">
+            <div class="code-label">Pairing-Code</div>
+            <div class="code-value placeholder" id="castCode">wird erzeugt…</div>
+          </div>
+          <div class="qr-divider">oder QR scannen</div>
+          <div class="qr-wrap" id="castQr"></div>
         </div>
-        <div class="url-display">
-          <span id="castUrl">…</span>
-          <button id="castUrlCopy">Kopieren</button>
+        <div class="cast-guest-only" id="castGuestBlock" hidden>
+          <div class="modal-step">
+            Verbunden mit dem TV — wird gleich gestreamt.
+          </div>
+          <div class="code-display">
+            <div class="code-label">Verbunden mit Code</div>
+            <div class="code-value" id="castGuestCode">…</div>
+          </div>
         </div>
-        <div class="modal-step">
-          <strong>2.</strong> Code eingeben oder die URL bereits mit Code verwenden:
-        </div>
-        <div class="code-display">
-          <div class="code-label">Pairing-Code</div>
-          <div class="code-value placeholder" id="castCode">wird erzeugt…</div>
-        </div>
-        <div class="qr-divider">oder QR scannen</div>
-        <div class="qr-wrap" id="castQr"></div>
         <div class="cast-status" id="castStatus">
           <span class="cast-status-dot"></span>
           <span id="castStatusText">Initialisiere…</span>
@@ -1497,6 +1552,27 @@
     // ───── WebTorrent → Samsung/Tizen-TV ─────
     const castBtn = document.getElementById('castBtn');
     const castModal = document.getElementById('castModal');
+    const castHostBlock = document.getElementById('castHostBlock');
+    const castGuestBlock = document.getElementById('castGuestBlock');
+    const castGuestCode = document.getElementById('castGuestCode');
+    const tvLinkBanner = document.getElementById('tvLinkBanner');
+    const tvLinkCode = document.getElementById('tvLinkCode');
+
+    // Wenn die Page über einen vom TV erzeugten QR-Code geöffnet wurde,
+    // steht der Pairing-Code als ?code=… im URL-Param. Dann läuft alles
+    // im "Guest-Modus": kein eigener Code generieren, kein QR anzeigen,
+    // direkt in den Room joinen, sobald der Nutzer eine Datei wählt.
+    const incomingCastCode = (new URLSearchParams(window.location.search).get('code') || '')
+      .toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+    if (incomingCastCode.length === 6) {
+      tvLinkCode.textContent = incomingCastCode.match(/.{1,3}/g).join(' ');
+      tvLinkBanner.hidden = false;
+      // Cast-Button-Text auf Direktsende-Modus umstellen
+      try {
+        const tn = Array.from(castBtn.childNodes).find(n => n.nodeType === Node.TEXT_NODE && n.textContent.trim());
+        if (tn) tn.textContent = ' An verbundenen TV senden ';
+      } catch {}
+    }
     const castClose = document.getElementById('castClose');
     const castUrlEl = document.getElementById('castUrl');
     const castUrlCopy = document.getElementById('castUrlCopy');
@@ -1631,42 +1707,46 @@
         setStatus('Bitte zuerst eine lokale Datei laden.', 'warn');
         return;
       }
+      const isGuest = incomingCastCode.length === 6;
       castModal.classList.add('open');
+      castHostBlock.hidden = isGuest;
+      castGuestBlock.hidden = !isGuest;
       setCastStatus('Lade WebTorrent & trystero…');
       castCodeEl.textContent = '…';
       castCodeEl.classList.add('placeholder');
       castUrlEl.textContent = getReceiverBaseUrl();
       castQr.innerHTML = '';
       castMeta.innerHTML = '';
+      if (isGuest) castGuestCode.textContent = incomingCastCode.match(/.{1,3}/g).join(' ');
 
       let trystero;
       try {
-        const [, ts] = await Promise.all([
-          loadWebTorrent(),
-          loadTrystero(),
-          loadScript('https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js'),
-        ]);
+        // qrcode-generator nur im Host-Modus laden (für eigenen QR im Modal)
+        const promises = [loadWebTorrent(), loadTrystero()];
+        if (!isGuest) promises.push(loadScript('https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js'));
+        const [, ts] = await Promise.all(promises);
         trystero = ts;
       } catch (e) {
         setCastStatus(e.message || 'Bibliotheken konnten nicht geladen werden.', 'err');
         return;
       }
 
-      const code = genCastCode();
+      const code = isGuest ? incomingCastCode : genCastCode();
       const baseUrl = getReceiverBaseUrl();
       const tvUrl = baseUrl + '?code=' + code;
 
-      castCodeEl.textContent = code.match(/.{1,3}/g).join(' ');
-      castCodeEl.classList.remove('placeholder');
-      castUrlEl.textContent = baseUrl;
-
-      try {
-        const qr = window.qrcode(0, 'M');
-        qr.addData(tvUrl);
-        qr.make();
-        castQr.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
-      } catch (e) {
-        castQr.innerHTML = '<span style="color:#888;font-size:12px">QR konnte nicht erzeugt werden</span>';
+      if (!isGuest) {
+        castCodeEl.textContent = code.match(/.{1,3}/g).join(' ');
+        castCodeEl.classList.remove('placeholder');
+        castUrlEl.textContent = baseUrl;
+        try {
+          const qr = window.qrcode(0, 'M');
+          qr.addData(tvUrl);
+          qr.make();
+          castQr.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+        } catch (e) {
+          castQr.innerHTML = '<span style="color:#888;font-size:12px">QR konnte nicht erzeugt werden</span>';
+        }
       }
 
       setCastStatus('Trete Pairing-Room bei…');
