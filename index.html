@@ -1,5 +1,4 @@
 <!DOCTYPE html>
-
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
@@ -8,6 +7,9 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="theme-color" content="#0a0a0a" />
   <title>Beam — Videos an den TV casten</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,400;1,9..144,600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -24,422 +26,656 @@
       --accent: #ff6b35;
       --accent-soft: rgba(255,107,53,0.12);
       --accent-glow: rgba(255,107,53,0.4);
+      --warn: #f5b342;
+      --warn-soft: rgba(245,179,66,0.12);
       --serif: "Fraunces", Georgia, serif;
       --sans: "Manrope", -apple-system, BlinkMacSystemFont, sans-serif;
     }
 
-```
-* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 
-html, body {
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--sans);
-  font-weight: 400;
-  line-height: 1.5;
-  min-height: 100vh;
-  overflow-x: hidden;
-  -webkit-font-smoothing: antialiased;
-}
+    html, body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-weight: 400;
+      line-height: 1.5;
+      min-height: 100vh;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
 
-body {
-  background:
-    radial-gradient(ellipse 80% 60% at 50% -10%, rgba(255,107,53,0.18), transparent 60%),
-    radial-gradient(ellipse 60% 40% at 90% 100%, rgba(255,107,53,0.08), transparent 50%),
-    var(--bg);
-  padding: max(env(safe-area-inset-top), 24px) 20px max(env(safe-area-inset-bottom), 32px);
-  position: relative;
-}
+    body {
+      background:
+        radial-gradient(ellipse 80% 60% at 50% -10%, rgba(255,107,53,0.18), transparent 60%),
+        radial-gradient(ellipse 60% 40% at 90% 100%, rgba(255,107,53,0.08), transparent 50%),
+        var(--bg);
+      padding: max(env(safe-area-inset-top), 24px) 20px max(env(safe-area-inset-bottom), 32px);
+      position: relative;
+    }
 
-/* Filmische Grain-Textur */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0.04;
-  mix-blend-mode: overlay;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  z-index: 1;
-}
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.04;
+      mix-blend-mode: overlay;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      z-index: 1;
+    }
 
-.container {
-  max-width: 720px;
-  margin: 0 auto;
-  position: relative;
-  z-index: 2;
-}
+    .container {
+      max-width: 720px;
+      margin: 0 auto;
+      position: relative;
+      z-index: 2;
+    }
 
-/* HEADER */
-.header { padding: 20px 0 36px; }
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-  margin-bottom: 28px;
-}
-.brand-dot {
-  width: 8px; height: 8px;
-  background: var(--accent);
-  border-radius: 50%;
-  box-shadow: 0 0 12px var(--accent-glow);
-  animation: pulse 2s ease-in-out infinite;
-}
-@keyframes pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.6; transform: scale(0.85); }
-}
-h1 {
-  font-family: var(--serif);
-  font-weight: 400;
-  font-size: clamp(38px, 9vw, 56px);
-  line-height: 1;
-  letter-spacing: -0.02em;
-  margin-bottom: 16px;
-}
-h1 em {
-  font-style: italic;
-  color: var(--accent);
-  font-weight: 400;
-}
-.lede {
-  font-size: 16px;
-  color: var(--text-dim);
-  max-width: 480px;
-  line-height: 1.5;
-}
+    .header { padding: 20px 0 36px; }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 28px;
+    }
+    .brand-dot {
+      width: 8px; height: 8px;
+      background: var(--accent);
+      border-radius: 50%;
+      box-shadow: 0 0 12px var(--accent-glow);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(0.85); }
+    }
+    h1 {
+      font-family: var(--serif);
+      font-weight: 400;
+      font-size: clamp(38px, 9vw, 56px);
+      line-height: 1;
+      letter-spacing: -0.02em;
+      margin-bottom: 16px;
+    }
+    h1 em {
+      font-style: italic;
+      color: var(--accent);
+      font-weight: 400;
+    }
+    .lede {
+      font-size: 16px;
+      color: var(--text-dim);
+      max-width: 480px;
+      line-height: 1.5;
+    }
 
-/* TABS */
-.tabs {
-  display: flex;
-  gap: 4px;
-  padding: 4px;
-  background: var(--bg-elev);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  margin-bottom: 16px;
-}
-.tab {
-  flex: 1;
-  padding: 12px 16px;
-  background: transparent;
-  border: none;
-  color: var(--text-dim);
-  font-family: var(--sans);
-  font-size: 14px;
-  font-weight: 600;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-.tab.active {
-  background: var(--bg-card);
-  color: var(--text);
-  box-shadow: 0 1px 0 var(--line-strong);
-}
+    .tabs {
+      display: flex;
+      gap: 4px;
+      padding: 4px;
+      background: var(--bg-elev);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      margin-bottom: 16px;
+    }
+    .tab {
+      flex: 1;
+      padding: 12px 16px;
+      background: transparent;
+      border: none;
+      color: var(--text-dim);
+      font-family: var(--sans);
+      font-size: 14px;
+      font-weight: 600;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .tab.active {
+      background: var(--bg-card);
+      color: var(--text);
+      box-shadow: 0 1px 0 var(--line-strong);
+    }
 
-/* INPUT-KARTEN */
-.input-card {
-  background: var(--bg-card);
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  padding: 24px;
-  margin-bottom: 24px;
-}
-.panel { display: none; }
-.panel.active { display: block; }
+    .input-card {
+      background: var(--bg-card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 24px;
+      margin-bottom: 16px;
+    }
+    .panel { display: none; }
+    .panel.active { display: block; }
 
-/* DATEI-PICKER */
-.file-drop {
-  border: 1.5px dashed var(--line-strong);
-  border-radius: 14px;
-  padding: 36px 20px;
-  text-align: center;
-  cursor: pointer;
-  transition: all 0.25s ease;
-  background: rgba(255,255,255,0.01);
-}
-.file-drop:hover, .file-drop:active {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-.file-drop-icon {
-  width: 48px; height: 48px;
-  margin: 0 auto 14px;
-  border-radius: 12px;
-  background: var(--accent-soft);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--accent);
-}
-.file-drop-title {
-  font-family: var(--serif);
-  font-style: italic;
-  font-size: 22px;
-  margin-bottom: 4px;
-}
-.file-drop-sub {
-  color: var(--text-faint);
-  font-size: 13px;
-}
-#fileInput { display: none; }
+    .file-drop {
+      display: block;
+      border: 1.5px dashed var(--line-strong);
+      border-radius: 14px;
+      padding: 36px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.25s ease;
+      background: rgba(255,255,255,0.01);
+    }
+    .file-drop:hover, .file-drop:active, .file-drop.dragover {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+    .file-drop-icon {
+      width: 48px; height: 48px;
+      margin: 0 auto 14px;
+      border-radius: 12px;
+      background: var(--accent-soft);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+    }
+    .file-drop-title {
+      font-family: var(--serif);
+      font-style: italic;
+      font-size: 22px;
+      margin-bottom: 4px;
+    }
+    .file-drop-sub {
+      color: var(--text-faint);
+      font-size: 13px;
+    }
+    #fileInput, #subtitleInput { display: none; }
 
-/* URL-INPUT */
-.url-row { display: flex; gap: 8px; }
-.url-input {
-  flex: 1;
-  background: var(--bg-elev);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 14px 16px;
-  color: var(--text);
-  font-family: var(--sans);
-  font-size: 15px;
-  outline: none;
-  transition: border-color 0.2s;
-}
-.url-input::placeholder { color: var(--text-faint); }
-.url-input:focus { border-color: var(--accent); }
-.url-btn {
-  background: var(--accent);
-  color: #fff;
-  border: none;
-  border-radius: 12px;
-  padding: 0 22px;
-  font-family: var(--sans);
-  font-weight: 700;
-  font-size: 14px;
-  cursor: pointer;
-  transition: transform 0.1s, opacity 0.2s;
-}
-.url-btn:active { transform: scale(0.96); }
-.url-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .url-row { display: flex; gap: 8px; }
+    .url-input {
+      flex: 1;
+      min-width: 0;
+      background: var(--bg-elev);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px 16px;
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 15px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .url-input::placeholder { color: var(--text-faint); }
+    .url-input:focus { border-color: var(--accent); }
+    .url-btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      padding: 0 22px;
+      font-family: var(--sans);
+      font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
+      transition: transform 0.1s, opacity 0.2s;
+    }
+    .url-btn:active { transform: scale(0.96); }
+    .url-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-/* PLAYER */
-.player-wrap {
-  position: relative;
-  background: #000;
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  overflow: hidden;
-  aspect-ratio: 16 / 9;
-  margin-bottom: 16px;
-}
-.player-wrap.empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-elev);
-}
-.player-wrap.empty::before {
-  content: "Noch kein Video geladen";
-  color: var(--text-faint);
-  font-family: var(--serif);
-  font-style: italic;
-  font-size: 18px;
-}
-video {
-  width: 100%;
-  height: 100%;
-  display: block;
-  background: #000;
-}
-video.hidden { display: none; }
+    .recent { margin-top: 16px; }
+    .recent[hidden] { display: none; }
+    .recent-title {
+      font-size: 11px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--text-faint);
+      margin-bottom: 8px;
+    }
+    .recent-list { list-style: none; }
+    .recent-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      background: var(--bg-elev);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      margin-bottom: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--text-dim);
+      transition: border-color 0.2s, color 0.2s;
+    }
+    .recent-item:hover { border-color: var(--line-strong); color: var(--text); }
+    .recent-url {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+    }
+    .recent-remove {
+      background: transparent;
+      border: none;
+      color: var(--text-faint);
+      cursor: pointer;
+      padding: 2px 6px;
+      font-size: 16px;
+      line-height: 1;
+      border-radius: 4px;
+    }
+    .recent-remove:hover { color: var(--text); }
 
-/* AIRPLAY-BUTTON */
-.airplay-btn {
-  width: 100%;
-  background: var(--accent);
-  color: #fff;
-  border: none;
-  border-radius: 16px;
-  padding: 18px 24px;
-  font-family: var(--sans);
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  transition: transform 0.1s, box-shadow 0.2s, opacity 0.2s;
-  box-shadow: 0 4px 24px var(--accent-glow);
-  margin-bottom: 12px;
-}
-.airplay-btn:active { transform: scale(0.98); }
-.airplay-btn:disabled {
-  background: var(--bg-elev);
-  color: var(--text-faint);
-  box-shadow: none;
-  cursor: not-allowed;
-}
-.airplay-btn svg { width: 22px; height: 22px; }
+    .subtitle-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+      padding: 0 4px;
+    }
+    .subtitle-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 14px;
+      background: var(--bg-elev);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      color: var(--text-dim);
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .subtitle-btn:hover { border-color: var(--line-strong); color: var(--text); }
+    .subtitle-name {
+      font-size: 12px;
+      color: var(--text-faint);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 240px;
+    }
+    .subtitle-clear {
+      background: transparent;
+      border: 1px solid var(--line);
+      color: var(--text-dim);
+      border-radius: 8px;
+      padding: 4px 10px;
+      cursor: pointer;
+      font-size: 12px;
+    }
 
-.status {
-  text-align: center;
-  font-size: 13px;
-  color: var(--text-faint);
-  margin-bottom: 32px;
-  min-height: 18px;
-}
-.status.ok { color: var(--accent); }
+    .player-wrap {
+      position: relative;
+      background: #000;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      overflow: hidden;
+      aspect-ratio: 16 / 9;
+      margin-bottom: 16px;
+    }
+    .player-wrap.empty {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg-elev);
+    }
+    .player-wrap.empty::before {
+      content: "Noch kein Video geladen";
+      color: var(--text-faint);
+      font-family: var(--serif);
+      font-style: italic;
+      font-size: 18px;
+    }
+    video {
+      width: 100%;
+      height: 100%;
+      display: block;
+      background: #000;
+    }
+    video.hidden { display: none; }
 
-/* ANLEITUNG */
-.guide {
-  background: var(--bg-card);
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  padding: 24px;
-  margin-bottom: 24px;
-}
-.guide-title {
-  font-family: var(--serif);
-  font-style: italic;
-  font-size: 22px;
-  margin-bottom: 16px;
-  letter-spacing: -0.01em;
-}
-.steps { list-style: none; counter-reset: step; }
-.steps li {
-  counter-increment: step;
-  padding: 14px 0 14px 44px;
-  position: relative;
-  border-top: 1px solid var(--line);
-  font-size: 14.5px;
-  color: var(--text-dim);
-  line-height: 1.55;
-}
-.steps li:first-child { border-top: none; padding-top: 4px; }
-.steps li::before {
-  content: counter(step);
-  position: absolute;
-  left: 0;
-  top: 14px;
-  width: 28px; height: 28px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--serif);
-  font-weight: 600;
-  font-size: 13px;
-}
-.steps li:first-child::before { top: 4px; }
-.steps strong { color: var(--text); font-weight: 600; }
+    .action-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .airplay-btn {
+      flex: 1;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 16px;
+      padding: 18px 24px;
+      font-family: var(--sans);
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      transition: transform 0.1s, box-shadow 0.2s, opacity 0.2s;
+      box-shadow: 0 4px 24px var(--accent-glow);
+    }
+    .airplay-btn:active { transform: scale(0.98); }
+    .airplay-btn:disabled {
+      background: var(--bg-elev);
+      color: var(--text-faint);
+      box-shadow: none;
+      cursor: not-allowed;
+    }
+    .airplay-btn svg { width: 22px; height: 22px; }
 
-.footer {
-  text-align: center;
-  padding: 20px 0 8px;
-  font-size: 12px;
-  color: var(--text-faint);
-  letter-spacing: 0.05em;
-}
-.footer em { font-family: var(--serif); font-style: italic; color: var(--text-dim); }
-```
+    .pip-btn {
+      flex: 0 0 auto;
+      background: var(--bg-card);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 0 18px;
+      font-family: var(--sans);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: border-color 0.2s, opacity 0.2s;
+    }
+    .pip-btn:hover { border-color: var(--line-strong); }
+    .pip-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .pip-btn[hidden] { display: none; }
+    .pip-btn svg { width: 16px; height: 16px; }
 
+    .status {
+      text-align: center;
+      font-size: 13px;
+      color: var(--text-faint);
+      margin-bottom: 16px;
+      min-height: 18px;
+      transition: color 0.2s;
+    }
+    .status.ok { color: var(--accent); }
+    .status.warn { color: var(--warn); }
+
+    .alert {
+      display: flex;
+      gap: 12px;
+      padding: 14px 16px;
+      background: var(--warn-soft);
+      border: 1px solid rgba(245,179,66,0.3);
+      border-radius: 12px;
+      margin-bottom: 16px;
+      font-size: 13.5px;
+      line-height: 1.5;
+      color: var(--text);
+    }
+    .alert[hidden] { display: none; }
+    .alert-icon {
+      flex: 0 0 auto;
+      color: var(--warn);
+      margin-top: 2px;
+    }
+    .alert strong { color: var(--warn); font-weight: 600; }
+    .alert code {
+      display: inline-block;
+      background: rgba(0,0,0,0.3);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+    }
+
+    .diag {
+      background: var(--bg-card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      margin-bottom: 16px;
+      overflow: hidden;
+    }
+    .diag summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 14px 18px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-dim);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .diag summary::-webkit-details-marker { display: none; }
+    .diag summary::after {
+      content: "+";
+      font-weight: 400;
+      font-size: 20px;
+      color: var(--text-faint);
+      transition: transform 0.2s;
+    }
+    .diag[open] summary::after { content: "−"; }
+    .diag-list {
+      padding: 4px 18px 18px;
+      font-size: 13px;
+      display: grid;
+      grid-template-columns: max-content 1fr;
+      gap: 6px 16px;
+    }
+    .diag-list dt {
+      color: var(--text-faint);
+      font-weight: 500;
+    }
+    .diag-list dd {
+      color: var(--text-dim);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12.5px;
+      overflow-wrap: anywhere;
+    }
+    .diag-list dd.ok { color: var(--accent); }
+    .diag-list dd.bad { color: var(--warn); }
+
+    .guide {
+      background: var(--bg-card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+    .guide-title {
+      font-family: var(--serif);
+      font-style: italic;
+      font-size: 22px;
+      margin-bottom: 16px;
+      letter-spacing: -0.01em;
+    }
+    .steps { list-style: none; counter-reset: step; }
+    .steps li {
+      counter-increment: step;
+      padding: 14px 0 14px 44px;
+      position: relative;
+      border-top: 1px solid var(--line);
+      font-size: 14.5px;
+      color: var(--text-dim);
+      line-height: 1.55;
+    }
+    .steps li:first-child { border-top: none; padding-top: 4px; }
+    .steps li::before {
+      content: counter(step);
+      position: absolute;
+      left: 0;
+      top: 14px;
+      width: 28px; height: 28px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--serif);
+      font-weight: 600;
+      font-size: 13px;
+    }
+    .steps li:first-child::before { top: 4px; }
+    .steps strong { color: var(--text); font-weight: 600; }
+
+    .footer {
+      text-align: center;
+      padding: 20px 0 8px;
+      font-size: 12px;
+      color: var(--text-faint);
+      letter-spacing: 0.05em;
+    }
+    .footer em { font-family: var(--serif); font-style: italic; color: var(--text-dim); }
+
+    body.dragover .file-drop {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
   </style>
 </head>
 <body>
   <div class="container">
 
-```
-<header class="header">
-  <div class="brand">
-    <span class="brand-dot"></span>
-    <span>Beam · v1</span>
-  </div>
-  <h1>Vom iPhone <em>auf den Fernseher</em>.</h1>
-  <p class="lede">Wähle ein lokales Video oder gib eine URL ein. Mit einem Tipp landet's via AirPlay direkt auf deinem TV.</p>
-</header>
+    <header class="header">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <span>Beam · v2</span>
+      </div>
+      <h1>Vom iPhone <em>auf den Fernseher</em>.</h1>
+      <p class="lede">Wähle ein lokales Video oder gib eine URL ein. Mit einem Tipp landet's via AirPlay direkt auf deinem TV.</p>
+    </header>
 
-<div class="tabs" role="tablist">
-  <button class="tab active" data-panel="file" role="tab">Aus Dateien</button>
-  <button class="tab" data-panel="url" role="tab">Per URL</button>
-</div>
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-panel="file" role="tab">Aus Dateien</button>
+      <button class="tab" data-panel="url" role="tab">Per URL</button>
+    </div>
 
-<div class="input-card">
-  <!-- DATEI-PANEL -->
-  <div class="panel active" data-panel="file">
-    <label class="file-drop" for="fileInput">
-      <div class="file-drop-icon">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 5v14M5 12l7-7 7 7"/>
+    <div class="input-card">
+      <div class="panel active" data-panel="file">
+        <label class="file-drop" for="fileInput" id="fileDrop">
+          <div class="file-drop-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 5v14M5 12l7-7 7 7"/>
+            </svg>
+          </div>
+          <div class="file-drop-title">Video auswählen</div>
+          <div class="file-drop-sub">tippen oder hierher ziehen · MP4, MOV, M4V, MKV</div>
+        </label>
+        <input type="file" id="fileInput" accept="video/*" />
+      </div>
+
+      <div class="panel" data-panel="url">
+        <div class="url-row">
+          <input type="url" class="url-input" id="urlInput" placeholder="https://… (mp4, m3u8 …)" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false" />
+          <button class="url-btn" id="urlBtn">Laden</button>
+        </div>
+        <div class="recent" id="recentList" hidden>
+          <div class="recent-title">Zuletzt verwendet</div>
+          <ul class="recent-list" id="recentItems"></ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="subtitle-row">
+      <label class="subtitle-btn" for="subtitleInput">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 7h18M3 12h18M3 17h12"/>
+        </svg>
+        Untertitel laden
+      </label>
+      <input type="file" id="subtitleInput" accept=".vtt,.srt,text/vtt" />
+      <span class="subtitle-name" id="subtitleName"></span>
+      <button class="subtitle-clear" id="subtitleClear" hidden>entfernen</button>
+    </div>
+
+    <div class="alert" id="alert" hidden>
+      <div class="alert-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
         </svg>
       </div>
-      <div class="file-drop-title">Video auswählen</div>
-      <div class="file-drop-sub">aus Fotos oder Dateien · MP4, MOV, M4V</div>
-    </label>
-    <input type="file" id="fileInput" accept="video/*" />
-  </div>
-
-  <!-- URL-PANEL -->
-  <div class="panel" data-panel="url">
-    <div class="url-row">
-      <input type="url" class="url-input" id="urlInput" placeholder="https://… (mp4, m3u8 …)" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false" />
-      <button class="url-btn" id="urlBtn">Laden</button>
+      <div id="alertText"></div>
     </div>
-  </div>
-</div>
 
-<div class="player-wrap empty" id="playerWrap">
-  <video
-    id="video"
-    class="hidden"
-    controls
-    playsinline
-    webkit-playsinline
-    x-webkit-airplay="allow"
-    crossorigin="anonymous"
-  ></video>
-</div>
+    <div class="player-wrap empty" id="playerWrap">
+      <video
+        id="video"
+        class="hidden"
+        controls
+        playsinline
+        webkit-playsinline
+        x-webkit-airplay="allow"
+      ></video>
+    </div>
 
-<button class="airplay-btn" id="airPlayBtn" disabled>
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1"/>
-    <polygon points="12 15 17 21 7 21 12 15" fill="currentColor"/>
-  </svg>
-  An TV senden
-</button>
-<div class="status" id="status">Lade ein Video, um AirPlay zu starten.</div>
+    <div class="action-row">
+      <button class="airplay-btn" id="airPlayBtn" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1"/>
+          <polygon points="12 15 17 21 7 21 12 15" fill="currentColor"/>
+        </svg>
+        An TV senden
+      </button>
+      <button class="pip-btn" id="pipBtn" disabled hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="5" width="18" height="14" rx="2"/>
+          <rect x="12" y="11" width="7" height="6" rx="1" fill="currentColor"/>
+        </svg>
+        PiP
+      </button>
+    </div>
+    <div class="status" id="status">Lade ein Video, um AirPlay zu starten.</div>
 
-<section class="guide">
-  <div class="guide-title">So funktioniert's</div>
-  <ol class="steps">
-    <li>Stelle sicher, dass dein <strong>iPhone und der Fernseher im selben WLAN</strong> sind (Apple TV oder AirPlay 2 fähiges Smart TV).</li>
-    <li>Lade ein Video — entweder aus deinen <strong>Dateien/Fotos</strong> oder über eine <strong>direkte Video-URL</strong> (z. B. .mp4 oder .m3u8).</li>
-    <li>Tippe auf <strong>„An TV senden"</strong> oder das AirPlay-Symbol in der Player-Steuerung und wähle dein Gerät.</li>
-    <li>Lehn dich zurück. Pause/Play funktioniert weiterhin auf dem iPhone.</li>
-  </ol>
-</section>
+    <details class="diag" id="diag">
+      <summary>Diagnose</summary>
+      <dl class="diag-list" id="diagList"></dl>
+    </details>
 
-<div class="footer">
-  <em>nur AirPlay · Chromecast wird auf iOS Safari nicht unterstützt</em>
-</div>
-```
+    <section class="guide">
+      <div class="guide-title">So funktioniert's</div>
+      <ol class="steps">
+        <li>Stelle sicher, dass dein <strong>iPhone und der Fernseher im selben WLAN</strong> sind (Apple TV oder AirPlay-2-fähiges Smart TV).</li>
+        <li>Lade ein Video — entweder aus deinen <strong>Dateien/Fotos</strong>, per <strong>Drag &amp; Drop</strong> oder über eine <strong>direkte Video-URL</strong> (z.&nbsp;B. .mp4 oder .m3u8).</li>
+        <li>Tippe auf <strong>„An TV senden"</strong> oder das AirPlay-Symbol in der Player-Steuerung und wähle dein Gerät.</li>
+        <li>Lehn dich zurück. Pause/Play funktioniert weiterhin auf dem iPhone — auch über das Sperrbildschirm-Widget.</li>
+      </ol>
+    </section>
+
+    <div class="footer">
+      <em>nur AirPlay · Chromecast wird auf iOS Safari nicht unterstützt</em>
+    </div>
 
   </div>
 
   <script>
+    'use strict';
+
     const fileInput = document.getElementById('fileInput');
+    const fileDrop = document.getElementById('fileDrop');
     const urlInput = document.getElementById('urlInput');
     const urlBtn = document.getElementById('urlBtn');
+    const subtitleInput = document.getElementById('subtitleInput');
+    const subtitleName = document.getElementById('subtitleName');
+    const subtitleClear = document.getElementById('subtitleClear');
     const video = document.getElementById('video');
     const playerWrap = document.getElementById('playerWrap');
     const airPlayBtn = document.getElementById('airPlayBtn');
+    const pipBtn = document.getElementById('pipBtn');
     const statusEl = document.getElementById('status');
+    const alertEl = document.getElementById('alert');
+    const alertText = document.getElementById('alertText');
+    const diagList = document.getElementById('diagList');
+    const recentList = document.getElementById('recentList');
+    const recentItems = document.getElementById('recentItems');
     const tabs = document.querySelectorAll('.tab');
     const panels = document.querySelectorAll('.panel');
 
-    // Tab-Wechsel
+    // ───── Tabs ─────
     tabs.forEach(tab => {
       tab.addEventListener('click', () => {
         const target = tab.dataset.panel;
@@ -448,12 +684,23 @@ video.hidden { display: none; }
       });
     });
 
+    // ───── State ─────
     let currentObjectURL = null;
+    let currentSubtitleURL = null;
+    let hlsInstance = null;
+    let wakeLock = null;
 
-    function setStatus(msg, ok = false) {
+    function setStatus(msg, kind = '') {
       statusEl.textContent = msg;
-      statusEl.classList.toggle('ok', ok);
+      statusEl.classList.remove('ok', 'warn');
+      if (kind) statusEl.classList.add(kind);
     }
+
+    function showAlert(html) {
+      alertText.innerHTML = html;
+      alertEl.hidden = false;
+    }
+    function hideAlert() { alertEl.hidden = true; }
 
     function releaseObjectURL() {
       if (currentObjectURL) {
@@ -462,116 +709,525 @@ video.hidden { display: none; }
       }
     }
 
-    function loadSource(src) {
-      video.src = src;
-      video.classList.remove('hidden');
-      playerWrap.classList.remove('empty');
-      video.load();
-      video.play().catch(() => {/* Autoplay kann blockiert sein, ignorieren */});
-      setStatus('Video geladen — bereit zum Casten.', true);
+    function destroyHls() {
+      if (hlsInstance) {
+        try { hlsInstance.destroy(); } catch {}
+        hlsInstance = null;
+      }
     }
 
-    // Datei-Auswahl
-    fileInput.addEventListener('change', (e) => {
-      const file = e.target.files && e.target.files[0];
-      if (!file) return;
-      // Erst die ALTE Object-URL freigeben, dann neue erzeugen.
-      // Sonst würde die gerade erstellte Blob-URL sofort widerrufen,
-      // was bei großen Dateien (mehrere GB) zum Abbruch führt, sobald
-      // Safari weitere Byte-Ranges nachladen will.
-      releaseObjectURL();
-      currentObjectURL = URL.createObjectURL(file);
-      loadSource(currentObjectURL);
-    });
+    function clearSubtitles() {
+      Array.from(video.querySelectorAll('track')).forEach(t => t.remove());
+      if (currentSubtitleURL) {
+        URL.revokeObjectURL(currentSubtitleURL);
+        currentSubtitleURL = null;
+      }
+      subtitleName.textContent = '';
+      subtitleClear.hidden = true;
+    }
 
-    // URL laden
+    // ───── Diagnostik ─────
+    const diag = {
+      data: {},
+      set(key, value, cls = '') {
+        this.data[key] = { value, cls };
+        this.render();
+      },
+      clear() { this.data = {}; this.render(); },
+      render() {
+        diagList.innerHTML = '';
+        for (const [key, { value, cls }] of Object.entries(this.data)) {
+          const dt = document.createElement('dt'); dt.textContent = key;
+          const dd = document.createElement('dd'); dd.textContent = value;
+          if (cls) dd.classList.add(cls);
+          diagList.appendChild(dt); diagList.appendChild(dd);
+        }
+      },
+    };
+
+    function formatBytes(b) {
+      if (b == null || isNaN(b)) return '–';
+      const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+      let i = 0; let n = Number(b);
+      while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+      return n.toFixed(n >= 100 ? 0 : n >= 10 ? 1 : 2) + ' ' + u[i];
+    }
+
+    // Initial-Diagnose: Capabilities
+    function initDiag() {
+      diag.set('User-Agent', navigator.userAgent.length > 80 ? navigator.userAgent.slice(0, 80) + '…' : navigator.userAgent);
+      const hlsNative = video.canPlayType('application/vnd.apple.mpegurl') !== '';
+      diag.set('HLS nativ', hlsNative ? 'ja (Safari)' : 'nein — hls.js wird verwendet', hlsNative ? 'ok' : '');
+      const pip = !!document.pictureInPictureEnabled || !!video.webkitSupportsPresentationMode;
+      diag.set('Picture-in-Picture', pip ? 'unterstützt' : 'nicht unterstützt', pip ? 'ok' : '');
+      diag.set('MediaSession', 'mediaSession' in navigator ? 'unterstützt' : 'nicht unterstützt', 'mediaSession' in navigator ? 'ok' : '');
+      diag.set('Wake Lock', 'wakeLock' in navigator ? 'unterstützt' : 'nicht unterstützt', 'wakeLock' in navigator ? 'ok' : '');
+      const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      if (c) {
+        const parts = [];
+        if (c.effectiveType) parts.push(c.effectiveType);
+        if (c.downlink) parts.push(c.downlink + ' Mbit/s');
+        if (c.rtt) parts.push(c.rtt + ' ms');
+        diag.set('Netzwerk', parts.join(' · ') || 'unbekannt');
+      }
+    }
+    initDiag();
+
+    // ───── HLS-Hilfen ─────
+    const isHlsUrl = (u) => /\.m3u8(\?|#|$)/i.test(u);
+    let hlsLoadPromise = null;
+    function ensureHls() {
+      if (window.Hls) return Promise.resolve(window.Hls);
+      if (hlsLoadPromise) return hlsLoadPromise;
+      hlsLoadPromise = new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.min.js';
+        s.onload = () => resolve(window.Hls);
+        s.onerror = () => reject(new Error('hls.js konnte nicht geladen werden'));
+        document.head.appendChild(s);
+      });
+      return hlsLoadPromise;
+    }
+
+    // ───── Faststart-Erkennung ─────
+    // Liest die ersten 64 KB einer Datei, scannt MP4/MOV-Boxen und meldet,
+    // ob der moov-Index VOR oder NACH dem mdat-Block liegt.
+    async function detectMp4Faststart(file) {
+      const head = await file.slice(0, 64 * 1024).arrayBuffer();
+      const view = new DataView(head);
+      const readType = (off) => {
+        let s = '';
+        for (let i = 0; i < 4; i++) s += String.fromCharCode(view.getUint8(off + i));
+        return s;
+      };
+      // Sanity-Check: erstes Top-Level-Box sollte ftyp/moov/free/skip/mdat/styp sein
+      if (view.byteLength < 16) return 'unknown';
+      const firstType = readType(4);
+      if (!/^(ftyp|moov|free|skip|mdat|styp|wide|pdin)$/.test(firstType)) {
+        return 'not-mp4';
+      }
+      let pos = 0;
+      while (pos + 8 <= view.byteLength) {
+        const size32 = view.getUint32(pos);
+        const type = readType(pos + 4);
+        let boxSize = size32;
+        if (size32 === 1) {
+          if (pos + 16 > view.byteLength) break;
+          const hi = view.getUint32(pos + 8);
+          const lo = view.getUint32(pos + 12);
+          boxSize = hi * 0x100000000 + lo;
+        } else if (size32 === 0) {
+          if (type === 'moov') return 'fast';
+          return 'slow';
+        }
+        if (type === 'moov') return 'fast';
+        if (type === 'mdat') return 'slow';
+        if (boxSize < 8) return 'unknown';
+        pos += boxSize;
+      }
+      return 'unknown';
+    }
+
+    // ───── Range-Request-Preflight ─────
+    async function checkRange(url) {
+      try {
+        const res = await fetch(url, { method: 'HEAD' });
+        return {
+          ok: res.ok,
+          status: res.status,
+          ranges: (res.headers.get('accept-ranges') || '').toLowerCase() === 'bytes',
+          length: res.headers.get('content-length'),
+          type: res.headers.get('content-type'),
+        };
+      } catch (e) {
+        return { ok: false, error: e.message };
+      }
+    }
+
+    // ───── Recent URLs ─────
+    const RECENT_KEY = 'beam.recent.v1';
+    const RECENT_MAX = 6;
+    function loadRecent() {
+      try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); }
+      catch { return []; }
+    }
+    function saveRecent(list) {
+      try { localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, RECENT_MAX))); }
+      catch {}
+    }
+    function pushRecent(url) {
+      const list = loadRecent().filter(u => u !== url);
+      list.unshift(url);
+      saveRecent(list);
+      renderRecent();
+    }
+    function removeRecent(url) {
+      saveRecent(loadRecent().filter(u => u !== url));
+      renderRecent();
+    }
+    function renderRecent() {
+      const list = loadRecent();
+      recentItems.innerHTML = '';
+      if (list.length === 0) { recentList.hidden = true; return; }
+      recentList.hidden = false;
+      for (const url of list) {
+        const li = document.createElement('li');
+        li.className = 'recent-item';
+        const span = document.createElement('span');
+        span.className = 'recent-url';
+        span.textContent = url;
+        span.addEventListener('click', () => {
+          urlInput.value = url;
+          submitUrl();
+        });
+        const rm = document.createElement('button');
+        rm.className = 'recent-remove';
+        rm.textContent = '×';
+        rm.setAttribute('aria-label', 'Entfernen');
+        rm.addEventListener('click', (e) => { e.stopPropagation(); removeRecent(url); });
+        li.appendChild(span); li.appendChild(rm);
+        recentItems.appendChild(li);
+      }
+    }
+    renderRecent();
+
+    // ───── Player-Lade-Pipeline ─────
+    function attachVideo() {
+      video.classList.remove('hidden');
+      playerWrap.classList.remove('empty');
+    }
+
+    function tryAutoplay() {
+      const p = video.play();
+      if (p && typeof p.catch === 'function') p.catch(() => { /* Autoplay kann blockiert sein */ });
+    }
+
+    async function loadFromUrl(url, displayName) {
+      destroyHls();
+      hideAlert();
+      diag.clear(); initDiag();
+      diag.set('Quelle', displayName || url);
+
+      // Range-Preflight (best effort, CORS kann blockieren)
+      checkRange(url).then(info => {
+        if (info.error) {
+          diag.set('HEAD-Anfrage', 'CORS/blockiert (' + info.error + ')');
+        } else {
+          diag.set('Status', String(info.status), info.ok ? 'ok' : 'bad');
+          diag.set('Content-Type', info.type || '–');
+          diag.set('Größe', formatBytes(info.length));
+          diag.set('Range-Requests', info.ranges ? 'unterstützt' : 'nicht angekündigt', info.ranges ? 'ok' : 'bad');
+          if (!info.ranges) {
+            showAlert('<strong>Server kündigt keine Range-Requests an.</strong> Spulen kann unzuverlässig sein. Idealerweise liefert der Server <code>Accept-Ranges: bytes</code>.');
+          }
+        }
+      });
+
+      const hlsNative = video.canPlayType('application/vnd.apple.mpegurl') !== '';
+      if (isHlsUrl(url) && !hlsNative) {
+        try {
+          const Hls = await ensureHls();
+          if (Hls.isSupported()) {
+            hlsInstance = new Hls({ enableWorker: true });
+            hlsInstance.loadSource(url);
+            hlsInstance.attachMedia(video);
+            diag.set('Wiedergabe-Engine', 'hls.js');
+          } else {
+            setStatus('HLS wird in diesem Browser nicht unterstützt.', 'warn');
+            return;
+          }
+        } catch (e) {
+          setStatus('hls.js konnte nicht geladen werden.', 'warn');
+          return;
+        }
+      } else {
+        video.src = url;
+        diag.set('Wiedergabe-Engine', hlsNative && isHlsUrl(url) ? 'Safari (nativ HLS)' : 'progressiv');
+        video.load();
+      }
+
+      attachVideo();
+      tryAutoplay();
+      setStatus('Quelle geladen — bereit zum Casten.', 'ok');
+      setMediaSession(displayName || url);
+    }
+
+    async function loadFromFile(file) {
+      destroyHls();
+      releaseObjectURL();
+      hideAlert();
+      diag.clear(); initDiag();
+      diag.set('Quelle', 'Datei');
+      diag.set('Dateiname', file.name);
+      diag.set('Größe', formatBytes(file.size));
+      diag.set('Typ', file.type || '–');
+
+      currentObjectURL = URL.createObjectURL(file);
+      video.src = currentObjectURL;
+      diag.set('Wiedergabe-Engine', 'progressiv (blob:)');
+      attachVideo();
+      video.load();
+      tryAutoplay();
+      setStatus('Video geladen — bereit zum Casten.', 'ok');
+      setMediaSession(file.name);
+
+      // Faststart-Check im Hintergrund
+      if (/\.(mp4|m4v|mov)$/i.test(file.name) || /^video\/(mp4|quicktime|x-m4v)/.test(file.type)) {
+        try {
+          const result = await detectMp4Faststart(file);
+          if (result === 'fast') {
+            diag.set('Faststart', 'ja (moov vor mdat)', 'ok');
+          } else if (result === 'slow') {
+            diag.set('Faststart', 'nein (moov am Ende)', 'bad');
+            showAlert(
+              '<strong>Diese MP4 hat den Index am Ende.</strong> Der Player muss vor dem ersten Frame viel mehr laden, und Spulen wird langsam. ' +
+              'Fix mit ffmpeg ohne Re-Encode: <code>ffmpeg -i input.mp4 -c copy -movflags +faststart output.mp4</code>'
+            );
+          } else if (result === 'not-mp4') {
+            diag.set('Container', 'nicht MP4 (z. B. MKV)');
+          } else {
+            diag.set('Faststart', 'unbekannt');
+          }
+        } catch (e) {
+          diag.set('Faststart', 'Prüfung fehlgeschlagen');
+        }
+      }
+    }
+
     function submitUrl() {
       const url = urlInput.value.trim();
       if (!url) return;
-      try {
-        new URL(url);
-      } catch {
-        setStatus('Bitte eine gültige URL eingeben.');
-        return;
-      }
-      releaseObjectURL();
-      loadSource(url);
+      try { new URL(url); }
+      catch { setStatus('Bitte eine gültige URL eingeben.', 'warn'); return; }
+      pushRecent(url);
+      loadFromUrl(url, url);
     }
-    urlBtn.addEventListener('click', submitUrl);
-    urlInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') submitUrl();
+
+    // ───── Datei-Auswahl ─────
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      loadFromFile(file);
     });
 
-    // ───── AirPlay-Detection & Trigger ─────
-    // Bevorzugt: WebKit-spezifische API (zuverlässig in iOS Safari)
+    urlBtn.addEventListener('click', submitUrl);
+    urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitUrl(); });
+
+    // ───── Drag & Drop ─────
+    let dragDepth = 0;
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(evt => {
+      window.addEventListener(evt, (e) => { e.preventDefault(); }, false);
+    });
+    window.addEventListener('dragenter', (e) => {
+      if (!e.dataTransfer || !Array.from(e.dataTransfer.types || []).includes('Files')) return;
+      dragDepth++;
+      document.body.classList.add('dragover');
+    });
+    window.addEventListener('dragleave', () => {
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) document.body.classList.remove('dragover');
+    });
+    window.addEventListener('drop', (e) => {
+      dragDepth = 0;
+      document.body.classList.remove('dragover');
+      const files = e.dataTransfer && e.dataTransfer.files;
+      if (!files || files.length === 0) return;
+      // Erst Untertitel, dann Video — falls beides gedroppt wird
+      let videoFile = null, subFile = null;
+      for (const f of files) {
+        if (/\.(vtt|srt)$/i.test(f.name)) subFile = f;
+        else if (f.type.startsWith('video/') || /\.(mp4|m4v|mov|mkv|webm)$/i.test(f.name)) videoFile = f;
+      }
+      if (videoFile) loadFromFile(videoFile);
+      if (subFile) loadSubtitleFile(subFile);
+      if (!videoFile && !subFile) {
+        setStatus('Diese Datei sieht nicht nach Video oder Untertitel aus.', 'warn');
+      }
+    });
+
+    // ───── Untertitel ─────
+    function srtToVtt(srt) {
+      const body = srt
+        .replace(/\r/g, '')
+        .replace(/^\d+\s*\n(?=\d{2}:\d{2}:\d{2})/gm, '')
+        .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
+      return 'WEBVTT\n\n' + body.trim() + '\n';
+    }
+    async function loadSubtitleFile(file) {
+      try {
+        const text = await file.text();
+        const isSrt = /\.srt$/i.test(file.name);
+        const vtt = isSrt ? srtToVtt(text) : text;
+        clearSubtitles();
+        const blob = new Blob([vtt], { type: 'text/vtt' });
+        currentSubtitleURL = URL.createObjectURL(blob);
+        const track = document.createElement('track');
+        track.kind = 'subtitles';
+        track.label = file.name.replace(/\.(vtt|srt)$/i, '');
+        track.srclang = 'de';
+        track.default = true;
+        track.src = currentSubtitleURL;
+        video.appendChild(track);
+        if (video.textTracks.length > 0) {
+          video.textTracks[0].mode = 'showing';
+        }
+        subtitleName.textContent = file.name;
+        subtitleClear.hidden = false;
+        diag.set('Untertitel', file.name + (isSrt ? ' (SRT → VTT)' : ''));
+      } catch (e) {
+        setStatus('Untertitel konnten nicht geladen werden.', 'warn');
+      }
+    }
+    subtitleInput.addEventListener('change', (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (f) loadSubtitleFile(f);
+    });
+    subtitleClear.addEventListener('click', () => {
+      clearSubtitles();
+      subtitleInput.value = '';
+    });
+
+    // ───── MediaSession ─────
+    function setMediaSession(title) {
+      if (!('mediaSession' in navigator)) return;
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: title || 'Beam',
+          artist: 'Beam',
+          album: '',
+          artwork: [
+            { src: 'icon.svg', sizes: '512x512', type: 'image/svg+xml' },
+          ],
+        });
+        const safeSet = (action, fn) => {
+          try { navigator.mediaSession.setActionHandler(action, fn); } catch {}
+        };
+        safeSet('play', () => video.play());
+        safeSet('pause', () => video.pause());
+        safeSet('seekbackward', (d) => { video.currentTime = Math.max(0, video.currentTime - (d?.seekOffset || 10)); });
+        safeSet('seekforward', (d) => { video.currentTime = Math.min(video.duration || 0, video.currentTime + (d?.seekOffset || 10)); });
+        safeSet('seekto', (d) => { if (d && typeof d.seekTime === 'number') video.currentTime = d.seekTime; });
+      } catch {}
+    }
+
+    // ───── Picture-in-Picture ─────
+    const pipSupported = !!document.pictureInPictureEnabled || typeof video.webkitSupportsPresentationMode === 'function';
+    if (pipSupported) {
+      pipBtn.hidden = false;
+    }
+    pipBtn.addEventListener('click', async () => {
+      try {
+        if (typeof video.webkitSetPresentationMode === 'function') {
+          const mode = video.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture';
+          video.webkitSetPresentationMode(mode);
+        } else if (document.pictureInPictureElement === video) {
+          await document.exitPictureInPicture();
+        } else {
+          await video.requestPictureInPicture();
+        }
+      } catch (e) {
+        setStatus('Picture-in-Picture konnte nicht aktiviert werden.', 'warn');
+      }
+    });
+
+    // ───── Wake Lock ─────
+    async function requestWakeLock() {
+      if (!('wakeLock' in navigator)) return;
+      try {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => { wakeLock = null; });
+      } catch {}
+    }
+    function releaseWakeLockNow() {
+      if (wakeLock) { try { wakeLock.release(); } catch {} }
+      wakeLock = null;
+    }
+    video.addEventListener('play', requestWakeLock);
+    video.addEventListener('pause', releaseWakeLockNow);
+    video.addEventListener('ended', releaseWakeLockNow);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && !video.paused) requestWakeLock();
+    });
+
+    // ───── Video-Events / Diagnose ─────
+    video.addEventListener('loadedmetadata', () => {
+      if (video.videoWidth) {
+        diag.set('Auflösung', video.videoWidth + ' × ' + video.videoHeight);
+      }
+      if (isFinite(video.duration)) {
+        const m = Math.floor(video.duration / 60);
+        const s = Math.floor(video.duration % 60).toString().padStart(2, '0');
+        diag.set('Dauer', m + ':' + s);
+      }
+      airPlayBtn.disabled = false;
+      pipBtn.disabled = false;
+    });
+
+    video.addEventListener('error', () => {
+      const err = video.error;
+      const code = err ? err.code : 0;
+      const map = { 1: 'abort', 2: 'network', 3: 'decode', 4: 'unsupported' };
+      setStatus('Video konnte nicht geladen werden (' + (map[code] || 'unbekannt') + '). Format oder URL prüfen.', 'warn');
+      diag.set('Fehler', map[code] || ('code ' + code), 'bad');
+    });
+
+    // ───── AirPlay ─────
     const hasWebKitAirPlay =
       typeof video.webkitShowPlaybackTargetPicker === 'function' &&
       'WebKitPlaybackTargetAvailabilityEvent' in window;
 
     if (hasWebKitAirPlay) {
+      diag.set('AirPlay', 'WebKit-API verfügbar', 'ok');
       video.addEventListener('webkitplaybacktargetavailabilitychanged', (e) => {
         if (e.availability === 'available') {
-          airPlayBtn.disabled = false;
-          if (!video.src) {
+          airPlayBtn.disabled = !video.src && !hlsInstance;
+          if (!video.src && !hlsInstance) {
             setStatus('AirPlay-Gerät erkannt. Lade jetzt ein Video.');
           } else {
-            setStatus('AirPlay-Gerät bereit. Tippe „An TV senden".', true);
+            setStatus('AirPlay-Gerät bereit. Tippe „An TV senden".', 'ok');
           }
         } else {
-          airPlayBtn.disabled = !video.src ? true : true;
           setStatus('Kein AirPlay-Gerät in der Nähe gefunden.');
         }
       });
 
       airPlayBtn.addEventListener('click', () => {
-        if (!video.src) {
-          setStatus('Bitte zuerst ein Video laden.');
+        if (!video.src && !hlsInstance) {
+          setStatus('Bitte zuerst ein Video laden.', 'warn');
           return;
         }
-        try {
-          video.webkitShowPlaybackTargetPicker();
-        } catch (err) {
-          setStatus('AirPlay-Auswahl konnte nicht geöffnet werden.');
-        }
+        try { video.webkitShowPlaybackTargetPicker(); }
+        catch { setStatus('AirPlay-Auswahl konnte nicht geöffnet werden.', 'warn'); }
       });
     }
-    // Fallback: Standard Remote Playback API
     else if (video.remote && typeof video.remote.prompt === 'function') {
+      diag.set('AirPlay', 'Remote Playback API', 'ok');
       video.remote.watchAvailability((available) => {
-        airPlayBtn.disabled = !available || !video.src;
+        airPlayBtn.disabled = !available || (!video.src && !hlsInstance);
         if (available) {
-          setStatus(video.src ? 'Casting-Gerät bereit.' : 'Casting-Gerät erkannt. Lade ein Video.', !!video.src);
+          setStatus(video.src || hlsInstance ? 'Casting-Gerät bereit.' : 'Casting-Gerät erkannt. Lade ein Video.', video.src || hlsInstance ? 'ok' : '');
         } else {
           setStatus('Kein Casting-Gerät gefunden.');
         }
-      }).catch(() => {
-        setStatus('Casting wird auf diesem Gerät nicht unterstützt.');
-      });
+      }).catch(() => { setStatus('Casting wird auf diesem Gerät nicht unterstützt.', 'warn'); });
 
       airPlayBtn.addEventListener('click', () => {
-        if (!video.src) { setStatus('Bitte zuerst ein Video laden.'); return; }
-        video.remote.prompt().catch(() => {
-          setStatus('Auswahl abgebrochen oder fehlgeschlagen.');
-        });
+        if (!video.src && !hlsInstance) { setStatus('Bitte zuerst ein Video laden.', 'warn'); return; }
+        video.remote.prompt().catch(() => { setStatus('Auswahl abgebrochen oder fehlgeschlagen.', 'warn'); });
       });
     }
-    // Kein Casting verfügbar
     else {
+      diag.set('AirPlay', 'nicht verfügbar', 'bad');
       airPlayBtn.disabled = true;
       setStatus('AirPlay nur in Safari auf dem iPhone/iPad/Mac verfügbar.');
     }
 
-    // Wenn ein Video geladen wurde, Button aktivieren (auch ohne Availability-Event)
-    video.addEventListener('loadedmetadata', () => {
-      if (hasWebKitAirPlay || (video.remote && typeof video.remote.prompt === 'function')) {
-        airPlayBtn.disabled = false;
-      }
-    });
-
-    // Fehlerbehandlung beim Laden
-    video.addEventListener('error', () => {
-      setStatus('Video konnte nicht geladen werden. Format oder URL prüfen.');
-    });
+    // ───── Service Worker ─────
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch(() => {});
+      });
+    }
   </script>
 
 </body>
