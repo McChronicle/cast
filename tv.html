@@ -357,7 +357,7 @@
     <div class="pair-card" id="pairCard">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · TV · v18</span>
+        <span>Beam · TV · v19</span>
       </div>
       <h1>Mit dem <em>iPhone</em> verbinden.</h1>
       <p class="lede">QR-Code mit der iPhone-Kamera scannen — Beam öffnet sich automatisch mit diesem TV verbunden.</p>
@@ -543,9 +543,32 @@
       return webTorrentLoadPromise;
     }
 
-    // Pairing läuft jetzt über ntfy.sh (HTTP/SSE). Kein WebRTC-Signaling-
-    // Broker mehr nötig — TV abonniert ein Code-spezifisches Topic, iPhone
-    // POSTet Magnet darauf. Status (TV → iPhone) läuft über zweites Topic.
+    // Pairing über MQTT-over-WebSocket auf EMQX' öffentlichem Broker.
+    // iPhone publiziert Magnet mit retain=true → Broker hält die Nachricht,
+    // wir bekommen sie sofort beim Subscribe (auch wenn iPhone vor uns gestartet hat).
+    let mqttLoadPromise = null;
+    function loadMqtt(progress) {
+      if (window.mqtt) return Promise.resolve();
+      if (mqttLoadPromise) return mqttLoadPromise;
+      const sources = [
+        { name: 'jsdelivr', fn: async () => { await loadScript('https://cdn.jsdelivr.net/npm/mqtt@5.10.4/dist/mqtt.min.js'); } },
+        { name: 'unpkg',    fn: async () => { await loadScript('https://unpkg.com/mqtt@5.10.4/dist/mqtt.min.js'); } },
+      ];
+      mqttLoadPromise = (async () => {
+        let lastErr;
+        for (let i = 0; i < sources.length; i++) {
+          const { name, fn } = sources[i];
+          if (progress) progress('mqtt.js via ' + name + ' (' + (i + 1) + '/' + sources.length + ')…');
+          try {
+            await withTimeout(fn(), 10000, 'mqtt.js ' + name);
+            if (window.mqtt && typeof window.mqtt.connect === 'function') return;
+          } catch (e) { lastErr = e; }
+        }
+        throw new Error('mqtt.js konnte nicht geladen werden' + (lastErr ? ': ' + lastErr.message : ''));
+      })();
+      return mqttLoadPromise;
+    }
+
 
     let session = null;
     let reportStatus = () => {};
@@ -553,7 +576,7 @@
     function disconnectSession() {
       if (!session) return;
       try { session.client && session.client.destroy(); } catch {}
-      try { session.magnetSrc && session.magnetSrc.close(); } catch {}
+      try { session.mqttClient && session.mqttClient.end(true); } catch {}
       session = null;
     }
 
@@ -562,93 +585,89 @@
       // erst sauber abbauen, dann neu verbinden.
       disconnectSession();
       pairBtn.disabled = true;
-      setStatus('Lade WebTorrent…');
+      setStatus('Lade WebTorrent & MQTT…');
       try {
-        await loadWebTorrent((s) => setStatus('Lade ' + s));
+        await Promise.all([
+          loadWebTorrent((s) => setStatus('Lade ' + s)),
+          loadMqtt((s) => setStatus('Lade ' + s)),
+        ]);
       } catch (e) {
-        setStatus(e.message || 'WebTorrent konnte nicht geladen werden.', 'err');
+        setStatus(e.message || 'Bibliotheken konnten nicht geladen werden.', 'err');
         pairBtn.disabled = false;
         return;
       }
 
-      setStatus('Bereit als Code ' + code + ' — warte auf iPhone.', 'ok');
+      setStatus('Bereit als Code ' + code + ' — verbinde zu Pairing-Broker…', 'ok');
 
-      const ntfyBase = 'https://ntfy.sh/';
-      const magnetTopic = 'beam-' + code.toLowerCase() + '-magnet';
-      const tvStatusTopic = 'beam-' + code.toLowerCase() + '-tvstatus';
+      const mqttUrl = 'wss://broker.emqx.io:8084/mqtt';
+      const magnetTopic = 'beam/' + code.toLowerCase() + '/magnet';
+      const tvStatusTopic = 'beam/' + code.toLowerCase() + '/tvstatus';
+      const clientId = 'beam-tv-' + Math.random().toString(36).slice(2, 10);
 
       let gotMagnet = false;
-      let sseOpen = false;
-      let postOk = false;
-      let sseEventCount = 0;
-      let magnetEventCount = 0;
+      let mqttConnected = false;
+      let messageCount = 0;
 
-      // Status zurück ans iPhone via ntfy.sh-POST.
-      // Sparsam posten — ntfy.sh-Rate-Limit (anonym ~30/h pro IP) ist
-      // sonst schnell weg. Status-Pings nur bei echten Phasen-Änderungen.
-      function postStatus(state, detail) {
+      const mqttClient = window.mqtt.connect(mqttUrl, {
+        clientId,
+        clean: true,
+        connectTimeout: 10000,
+        reconnectPeriod: 3000,
+      });
+      session = { client: null, torrent: null, mqttClient };
+
+      // Status zurück ans iPhone — sparsam, nur bei echten Phasen-Änderungen.
+      function publishStatus(state, detail) {
+        if (!mqttConnected) return;
         const payload = JSON.stringify({ state, detail, ts: Date.now() });
-        fetch(ntfyBase + tvStatusTopic, { method: 'POST', body: payload })
-          .then((r) => {
-            if (r.ok) {
-              postOk = true;
-            } else if (r.status === 429) {
-              setStatus('ntfy-Rate-Limit erreicht — kurz warten und neu versuchen.', 'err');
-            } else if (!postOk) {
-              setStatus('ntfy-POST fehlgeschlagen: HTTP ' + r.status, 'err');
-            }
-          })
-          .catch((e) => {
-            if (!postOk) setStatus('ntfy-POST-Fehler: ' + (e && e.message || e), 'err');
-          });
+        // retain=true, damit ein iPhone das nach uns subscribed direkt erfährt
+        mqttClient.publish(tvStatusTopic, payload, { qos: 1, retain: true });
       }
-      reportStatus = postStatus;
+      reportStatus = publishStatus;
 
-      // Einmalige "subscribed"-Nachricht: signalisiert dem iPhone, dass
-      // TV bereit ist. Kein periodischer Re-post — würde Rate-Limit reissen.
-      postStatus('subscribed');
+      mqttClient.on('connect', () => {
+        mqttConnected = true;
+        setStatus('Bereit als Code ' + code + ' — MQTT-Kanal offen, warte auf iPhone.', 'ok');
+        // Subscribe auf Magnet-Topic. Falls iPhone retain=true gesetzt hat
+        // (was es tut), bekommen wir die letzte Nachricht sofort.
+        mqttClient.subscribe(magnetTopic, { qos: 1 });
+        // Einmal "subscribed" mitteilen, retained, damit iPhone weiß dass TV da ist
+        publishStatus('subscribed');
+      });
 
-      // Magnet-Topic abonnieren. since=2h: ntfy.sh cached Messages stundenlang;
-      // damit fängt TV einen Magnet, der schon vor uns gepostet wurde.
-      const magnetSrc = new EventSource(ntfyBase + magnetTopic + '/sse?since=2h');
-      session = { client: null, torrent: null, magnetSrc };
+      mqttClient.on('error', (err) => {
+        if (!gotMagnet) setStatus('MQTT-Fehler: ' + (err && err.message || err), 'err');
+      });
 
-      magnetSrc.onopen = () => {
-        sseOpen = true;
-        if (!gotMagnet) setStatus('Bereit als Code ' + code + ' — Magnet-Kanal offen, warte auf iPhone.', 'ok');
-      };
-      magnetSrc.onerror = () => {
-        sseOpen = false;
-      };
+      mqttClient.on('close', () => {
+        mqttConnected = false;
+      });
 
-      magnetSrc.onmessage = (ev) => {
-        sseEventCount++;
+      mqttClient.on('message', (topic, payload) => {
+        if (topic !== magnetTopic) return;
+        messageCount++;
+        const text = payload.toString();
+        if (!text) return; // leere Payload = retained-clear
         try {
-          const data = JSON.parse(ev.data);
-          if (data.event !== 'message') return;
-          magnetEventCount++;
-          const meta = JSON.parse(data.message);
+          const meta = JSON.parse(text);
           if (!meta || !meta.magnet || gotMagnet) return;
-          // Nicht zu alte Magnete übernehmen (max. 10 min alt)
+          // Replay-Schutz: zu alte Magnete (>10 min) ignorieren
           if (meta.ts && Date.now() - meta.ts > 10 * 60 * 1000) {
             setStatus('Veralteten Magnet ignoriert (älter als 10 min) — sende erneut vom iPhone.', 'err');
             return;
           }
           gotMagnet = true;
-          try { magnetSrc.close(); } catch {}
           setStatus('Magnet erhalten — starte Stream…', 'ok');
           startTorrent(meta);
         } catch {}
-      };
+      });
 
       // Hinweis nach 60 s
       setTimeout(() => {
-        if (!gotMagnet && session && session.magnetSrc === magnetSrc) {
+        if (!gotMagnet && session && session.mqttClient === mqttClient) {
           const parts = [];
-          parts.push('SSE ' + (sseOpen ? 'offen' : 'zu'));
-          parts.push(sseEventCount + ' Events');
-          parts.push(magnetEventCount + ' Magnete');
-          parts.push('POST ' + (postOk ? 'OK' : 'fehlgeschlagen'));
+          parts.push('MQTT ' + (mqttConnected ? 'verbunden' : 'getrennt'));
+          parts.push(messageCount + ' Messages');
           setStatus('Kein Magnet in 60 s [' + parts.join(', ') + ']. iPhone Cast für Code ' + code + ' gestartet?', 'err');
           pairBtn.disabled = false;
         }
