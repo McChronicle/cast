@@ -2,7 +2,7 @@
 // Cached nur die statischen Assets; Videos und externe CDN-Skripte
 // werden NICHT abgefangen (würden ggf. großen Speicher fressen).
 
-const CACHE = 'beam-shell-v6';
+const CACHE = 'beam-shell-v7';
 const SHELL = [
   './',
   './index.html',
