@@ -802,7 +802,7 @@
     <header class="header">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · v9</span>
+        <span>Beam · v10</span>
       </div>
       <h1>Vom iPhone <em>auf den Fernseher</em>.</h1>
       <p class="lede">Wähle ein lokales Video oder gib eine URL ein. Mit einem Tipp landet's via AirPlay direkt auf deinem TV.</p>
@@ -1658,15 +1658,17 @@
       return webTorrentLoadPromise;
     }
 
-    // trystero: Pairing über BitTorrent-Tracker statt eigenem Signaling-Server.
-    // Nutzt dieselbe Infrastruktur wie WebTorrent — wenn Daten gehen, geht auch Pairing.
+    // trystero: Pairing über Nostr-Relays. /torrent (WebTorrent-Tracker) war
+    // unzuverlässig — Tracker-Pool fragmentiert, Peers fanden sich nicht.
+    // Nostr-Relays sind dafür stabiler. Nur das Signaling läuft darüber,
+    // die eigentliche Datenübertragung bleibt WebRTC/WebTorrent.
     let trysteroLoadPromise = null;
     function loadTrystero(progress) {
       if (window.__trystero) return Promise.resolve(window.__trystero);
       if (trysteroLoadPromise) return trysteroLoadPromise;
       const sources = [
-        { name: 'esm.sh@0.20', fn: () => import('https://esm.sh/trystero@0.20.0/torrent') },
-        { name: 'esm.sh@0.21', fn: () => import('https://esm.sh/trystero@0.21.5/torrent') },
+        { name: 'nostr@0.21.5', fn: () => import('https://esm.sh/trystero@0.21.5/nostr') },
+        { name: 'nostr@0.20.0', fn: () => import('https://esm.sh/trystero@0.20.0/nostr') },
       ];
       trysteroLoadPromise = (async () => {
         let lastErr;
