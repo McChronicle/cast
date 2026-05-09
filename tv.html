@@ -357,7 +357,7 @@
     <div class="pair-card" id="pairCard">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · TV · v24</span>
+        <span>Beam · TV · v25</span>
       </div>
       <h1>Mit dem <em>iPhone</em> verbinden.</h1>
       <p class="lede">QR-Code mit der iPhone-Kamera scannen — Beam öffnet sich automatisch mit diesem TV verbunden.</p>
@@ -744,17 +744,53 @@
           drainQueue(trackId);
         }
 
+        // Evictiert alte Segmente vor (currentTime - keepSeconds), damit der
+        // SourceBuffer nicht ins Tizen-Quota läuft. MSE evictioniert NICHT
+        // automatisch — wir müssen sb.remove() selbst rufen.
+        function evictOld(trackId, keepSeconds, force) {
+          const tb = trackBuffers[trackId];
+          if (!tb || !tb.sb || tb.sb.updating) return false;
+          if (!videoElement) return false;
+          const buffered = tb.sb.buffered;
+          if (buffered.length === 0) return false;
+          const ct = videoElement.currentTime || 0;
+          const start = buffered.start(0);
+          const cutoff = force ? Math.max(start + 1, ct - 1) : Math.max(start, ct - keepSeconds);
+          if (cutoff > start) {
+            try {
+              tb.sb.remove(start, cutoff);
+              return true;
+            } catch {}
+          }
+          return false;
+        }
+
         function drainQueue(trackId) {
           const tb = trackBuffers[trackId];
           if (!tb || !tb.sb || tb.sb.updating || tb.queue.length === 0) return;
-          const buf = tb.queue.shift();
+          const buf = tb.queue[0]; // peek erst, shift bei Erfolg
           try {
             tb.sb.appendBuffer(buf);
+            tb.queue.shift();
           } catch (e) {
-            // Wenn appendBuffer wirft (typ. QuotaExceededError oder InvalidStateError),
-            // setze MSE als kaputt und schalte auf Blob-Fallback um.
-            mseBroken = true;
-            setStatus('SourceBuffer-Fehler (' + trackId + '): ' + (e.message || e) + ' — Blob-Fallback', 'err');
+            if (e.name === 'QuotaExceededError') {
+              // Buffer voll — evict aggressiv (nur 1 s Look-Behind statt 30)
+              const evicted = evictOld(trackId, 1, true);
+              if (!evicted) {
+                // Nichts zu evictieren (Wiedergabe noch nicht weit genug?) →
+                // kann nichts mehr tun ohne ungespielte Daten zu verwerfen.
+                setStatus('SourceBuffer voll, Wiedergabe nicht weit genug — Codec evtl. zu groß für TV.', 'err');
+                mseBroken = true;
+              }
+              // Buffer bleibt in queue, retry nach evict-updateend
+            } else if (e.name === 'InvalidStateError') {
+              // SourceBuffer wurde geschlossen — fallback
+              mseBroken = true;
+              setStatus('SourceBuffer geschlossen: ' + (e.message || e), 'err');
+            } else {
+              mseBroken = true;
+              setStatus('SourceBuffer-Fehler (' + trackId + '): ' + (e.message || e), 'err');
+            }
           }
         }
 
@@ -774,7 +810,13 @@
             return;
           }
           trackBuffers[trackId] = { sb, queue: [], mime };
-          sb.addEventListener('updateend', () => drainQueue(trackId));
+          sb.addEventListener('updateend', () => {
+            // Erst regulär evictieren (alles 30 s vor currentTime), dann queue drainen
+            if (videoElement && videoElement.currentTime > 35) {
+              if (evictOld(trackId, 30, false)) return; // remove triggert wieder updateend
+            }
+            drainQueue(trackId);
+          });
           sb.addEventListener('error', () => {
             setStatus('SourceBuffer-Error für ' + mime, 'err');
           });
@@ -847,7 +889,15 @@
             if (loading && loading.style.display !== 'none' && totalBytesLocal) {
               const pct = Math.round((bytesReceived / totalBytesLocal) * 100);
               loadingText.textContent = 'Empfange Stream…';
-              loadingProgress.textContent = pct + '% · ' + formatBytes(bytesReceived) + ' / ' + formatBytes(totalBytesLocal);
+              let bufInfo = '';
+              try {
+                if (videoElement && videoElement.buffered.length > 0) {
+                  const ct = videoElement.currentTime || 0;
+                  const end = videoElement.buffered.end(videoElement.buffered.length - 1);
+                  bufInfo = ' · ▶ ' + ct.toFixed(1) + ' s · Buffer ' + (end - ct).toFixed(1) + ' s';
+                }
+              } catch {}
+              loadingProgress.textContent = pct + '% · ' + formatBytes(bytesReceived) + ' / ' + formatBytes(totalBytesLocal) + bufInfo;
             }
           }
         };

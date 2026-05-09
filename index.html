@@ -802,7 +802,7 @@
     <header class="header">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · v24</span>
+        <span>Beam · v25</span>
       </div>
       <h1>Vom iPhone <em>auf den Fernseher</em>.</h1>
       <p class="lede">Wähle ein lokales Video oder gib eine URL ein. Mit einem Tipp landet's via AirPlay direkt auf deinem TV.</p>
@@ -2000,6 +2000,9 @@
           mp4box.onSegment = (id, user, buffer, sampleNum, last) => {
             // Queue, wir verarbeiten outside des sync callbacks
             pendingSegments.push({ id, buffer, last: !!last });
+            // mp4box-internen Sample-Speicher freigeben — sonst wächst der
+            // Speicher bei GB-Files unbegrenzt.
+            try { mp4box.releaseUsedSamples(id, sampleNum); } catch {}
           };
 
           // Worker-Loop: drain pendingSegments parallel zum appendBuffer
