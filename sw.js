@@ -3,7 +3,7 @@
 // Andere Shell-Assets: cache-first.
 // Videos und CDN-Skripte werden NICHT abgefangen.
 
-const CACHE = 'beam-shell-v8';
+const CACHE = 'beam-shell-v9';
 const SHELL = [
   './',
   './index.html',

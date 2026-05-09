@@ -802,7 +802,7 @@
     <header class="header">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · v8</span>
+        <span>Beam · v9</span>
       </div>
       <h1>Vom iPhone <em>auf den Fernseher</em>.</h1>
       <p class="lede">Wähle ein lokales Video oder gib eine URL ein. Mit einem Tipp landet's via AirPlay direkt auf deinem TV.</p>
@@ -1621,23 +1621,35 @@
       return p;
     }
 
+    // Wrappt eine Promise mit einem Timeout, damit hängende CDN-Requests
+    // nicht den ganzen Pairing-Flow blockieren.
+    function withTimeout(promise, ms, label) {
+      return new Promise((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('Timeout nach ' + ms + ' ms: ' + label)), ms);
+        promise.then((v) => { clearTimeout(t); resolve(v); },
+                     (e) => { clearTimeout(t); reject(e); });
+      });
+    }
+
     let webTorrentLoadPromise = null;
-    function loadWebTorrent() {
+    function loadWebTorrent(progress) {
       if (window.WebTorrent) return Promise.resolve();
       if (webTorrentLoadPromise) return webTorrentLoadPromise;
       const sources = [
-        async () => { await loadScript('https://cdn.jsdelivr.net/npm/webtorrent@1.9.7/webtorrent.min.js'); },
-        async () => { await loadScript('https://unpkg.com/webtorrent@1.9.7/webtorrent.min.js'); },
-        async () => {
+        { name: 'jsdelivr', fn: async () => { await loadScript('https://cdn.jsdelivr.net/npm/webtorrent@1.9.7/webtorrent.min.js'); } },
+        { name: 'unpkg',    fn: async () => { await loadScript('https://unpkg.com/webtorrent@1.9.7/webtorrent.min.js'); } },
+        { name: 'esm.sh',   fn: async () => {
           const m = await import('https://esm.sh/webtorrent@2.4.1?bundle');
           window.WebTorrent = m.default || m.WebTorrent;
-        },
+        } },
       ];
       webTorrentLoadPromise = (async () => {
         let lastErr;
-        for (const fn of sources) {
+        for (let i = 0; i < sources.length; i++) {
+          const { name, fn } = sources[i];
+          if (progress) progress('WebTorrent via ' + name + ' (' + (i + 1) + '/' + sources.length + ')…');
           try {
-            await fn();
+            await withTimeout(fn(), 10000, 'WebTorrent ' + name);
             if (typeof window.WebTorrent === 'function') return;
           } catch (e) { lastErr = e; }
         }
@@ -1649,18 +1661,20 @@
     // trystero: Pairing über BitTorrent-Tracker statt eigenem Signaling-Server.
     // Nutzt dieselbe Infrastruktur wie WebTorrent — wenn Daten gehen, geht auch Pairing.
     let trysteroLoadPromise = null;
-    function loadTrystero() {
+    function loadTrystero(progress) {
       if (window.__trystero) return Promise.resolve(window.__trystero);
       if (trysteroLoadPromise) return trysteroLoadPromise;
       const sources = [
-        () => import('https://esm.sh/trystero@0.20.0/torrent'),
-        () => import('https://esm.sh/trystero@0.21.5/torrent'),
+        { name: 'esm.sh@0.20', fn: () => import('https://esm.sh/trystero@0.20.0/torrent') },
+        { name: 'esm.sh@0.21', fn: () => import('https://esm.sh/trystero@0.21.5/torrent') },
       ];
       trysteroLoadPromise = (async () => {
         let lastErr;
-        for (const fn of sources) {
+        for (let i = 0; i < sources.length; i++) {
+          const { name, fn } = sources[i];
+          if (progress) progress('trystero via ' + name + ' (' + (i + 1) + '/' + sources.length + ')…');
           try {
-            const mod = await fn();
+            const mod = await withTimeout(fn(), 10000, 'trystero ' + name);
             if (typeof mod.joinRoom === 'function') {
               window.__trystero = mod;
               return mod;
@@ -1723,8 +1737,10 @@
       let trystero;
       try {
         // qrcode-generator nur im Host-Modus laden (für eigenen QR im Modal)
-        const promises = [loadWebTorrent(), loadTrystero()];
-        if (!isGuest) promises.push(loadScript('https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js'));
+        const wtP = loadWebTorrent((s) => setCastStatus('Lade ' + s));
+        const tsP = loadTrystero((s) => setCastStatus('Lade ' + s));
+        const promises = [wtP, tsP];
+        if (!isGuest) promises.push(withTimeout(loadScript('https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js'), 10000, 'qrcode-generator'));
         const [, ts] = await Promise.all(promises);
         trystero = ts;
       } catch (e) {
