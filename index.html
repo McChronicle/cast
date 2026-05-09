@@ -802,7 +802,7 @@
     <header class="header">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · v23</span>
+        <span>Beam · v24</span>
       </div>
       <h1>Vom iPhone <em>auf den Fernseher</em>.</h1>
       <p class="lede">Wähle ein lokales Video oder gib eine URL ein. Mit einem Tipp landet's via AirPlay direkt auf deinem TV.</p>
@@ -1631,10 +1631,30 @@
       });
     }
 
-    // WebTorrent und mp4box.js sind in v23 nicht mehr nötig — Daten gehen
-    // direkt via WebRTC-DataChannel als rohe Chunks an den TV, der baut
-    // einen Blob und spielt ihn ab. Kein MSE-Streaming, also Größenlimit
-    // ~1-1.5 GB (Tizen-RAM). Für GB-Files: AirPlay nutzen.
+    // mp4box.js — fragmentiert MP4-Dateien on-the-fly zu MSE-tauglichem
+    // fragmented MP4 (eines pro Track: Video + Audio separat).
+    let mp4boxLoadPromise = null;
+    function loadMp4box(progress) {
+      if (window.MP4Box) return Promise.resolve();
+      if (mp4boxLoadPromise) return mp4boxLoadPromise;
+      const sources = [
+        { name: 'jsdelivr', fn: async () => { await loadScript('https://cdn.jsdelivr.net/npm/mp4box@0.5.4/dist/mp4box.all.min.js'); } },
+        { name: 'unpkg',    fn: async () => { await loadScript('https://unpkg.com/mp4box@0.5.4/dist/mp4box.all.min.js'); } },
+      ];
+      mp4boxLoadPromise = (async () => {
+        let lastErr;
+        for (let i = 0; i < sources.length; i++) {
+          const { name, fn } = sources[i];
+          if (progress) progress('mp4box.js via ' + name + ' (' + (i + 1) + '/' + sources.length + ')…');
+          try {
+            await withTimeout(fn(), 10000, 'mp4box.js ' + name);
+            if (window.MP4Box && typeof window.MP4Box.createFile === 'function') return;
+          } catch (e) { lastErr = e; }
+        }
+        throw new Error('mp4box.js konnte nicht geladen werden' + (lastErr ? ': ' + lastErr.message : ''));
+      })();
+      return mp4boxLoadPromise;
+    }
 
     // Pairing über MQTT-over-WebSocket auf EMQX' öffentlichem Broker.
     // ntfy.sh' anonymer Rate-Limit (~30/h pro IP) war für unseren
@@ -1726,13 +1746,12 @@
       if (isGuest) castGuestCode.textContent = incomingCastCode.match(/.{1,3}/g).join(' ');
 
       try {
-        // Pairing über MQTT (Signaling) + WebRTC-DataChannel (Daten).
-        // Datei wird als rohe Chunks über DataChannel an TV gesendet,
-        // TV baut Blob und spielt ab — das deckt alle Formate ab, die
-        // das <video>-Element nativ unterstützt. Größenlimit ~1-1.5 GB
-        // (TV-RAM). Für GB-Files ohne RAM-Limit: AirPlay nutzen.
+        // MQTT (SDP/ICE-Signaling) + WebRTC-DataChannel (Daten).
+        // mp4box.js fragmentiert das MP4 on-the-fly pro Track für MSE-Streaming
+        // ohne RAM-Limit. iPhone-Aufnahmen sind nicht-streamable MP4 (moov hinten).
         const promises = [
           loadMqtt((s) => setCastStatus('Lade ' + s)),
+          loadMp4box((s) => setCastStatus('Lade ' + s)),
         ];
         if (!isGuest) promises.push(withTimeout(loadScript('https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js'), 10000, 'qrcode-generator'));
         await Promise.all(promises);
@@ -1899,7 +1918,7 @@
       // über den DataChannel an den TV senden.
       async function startSendingFile() {
         try {
-          // Metadata an TV — TV erstellt damit Video-Element & Blob-Container
+          // Metadata an TV — TV erstellt damit den Player.
           dc.send(JSON.stringify({
             type: 'metadata',
             name: currentFile.name,
@@ -1907,25 +1926,121 @@
             mime: currentFile.type || 'video/mp4',
           }));
 
-          // File chunk-weise via File.slice + arrayBuffer lesen (kein
-          // FileReader → kein OOM bei großen Files), via DataChannel senden.
-          // Backpressure: max 8 MB im DataChannel-Buffer.
-          const chunkSize = 256 * 1024;
-          for (let off = 0; off < currentFile.size; off += chunkSize) {
-            while (dc.bufferedAmount > 8 * 1024 * 1024) {
-              await new Promise((r) => setTimeout(r, 50));
-            }
-            const slice = currentFile.slice(off, Math.min(off + chunkSize, currentFile.size));
-            const buf = await slice.arrayBuffer();
-            dc.send(buf);
-            bytesSent += buf.byteLength;
-            if (off % (chunkSize * 16) === 0) refreshStatus();
+          const isMp4 = /\.(mp4|m4v|mov)$/i.test(currentFile.name) ||
+                        /^video\/(mp4|quicktime)/i.test(currentFile.type);
+          if (isMp4) {
+            await sendAsFragmentedMp4();
+          } else {
+            await sendRawChunks();
           }
-          refreshStatus();
           dc.send(JSON.stringify({ type: 'done' }));
         } catch (e) {
           setCastStatus('Senden fehlgeschlagen: ' + (e && e.message || e), 'err');
         }
+      }
+
+      async function waitForBuffer() {
+        while (dc.bufferedAmount > 8 * 1024 * 1024) {
+          await new Promise((r) => setTimeout(r, 50));
+        }
+      }
+
+      async function sendRawChunks() {
+        // Nicht-MP4 / unbekanntes Format: roh durchreichen, TV macht Blob.
+        const chunkSize = 256 * 1024;
+        for (let off = 0; off < currentFile.size; off += chunkSize) {
+          await waitForBuffer();
+          const slice = currentFile.slice(off, Math.min(off + chunkSize, currentFile.size));
+          const buf = await slice.arrayBuffer();
+          dc.send(buf);
+          bytesSent += buf.byteLength;
+          if (off % (chunkSize * 16) === 0) refreshStatus();
+        }
+        refreshStatus();
+      }
+
+      // Korrekte Multi-Track-Fragmentierung: für jeden Track (Video, Audio)
+      // separates Init-Segment + Media-Segments senden, jeweils mit trackId.
+      // TV öffnet pro Track einen eigenen SourceBuffer im selben MediaSource.
+      async function sendAsFragmentedMp4() {
+        return new Promise(async (resolve, reject) => {
+          const mp4box = window.MP4Box.createFile();
+          const trackInfo = {}; // { [trackId]: { type: 'video'|'audio', mime } }
+          const pendingSegments = []; // queue if onSegment fires before init sent
+
+          mp4box.onError = (err) => reject(new Error('mp4box-Fehler: ' + err));
+
+          mp4box.onReady = async (info) => {
+            try {
+              const videoIds = (info.videoTracks || []).map((t) => t.id);
+              const audioIds = (info.audioTracks || []).map((t) => t.id);
+              for (const t of (info.tracks || [])) {
+                let kind = 'unknown';
+                if (videoIds.indexOf(t.id) >= 0) kind = 'video';
+                else if (audioIds.indexOf(t.id) >= 0) kind = 'audio';
+                if (kind === 'unknown') continue;
+                const mime = (kind === 'video' ? 'video/mp4' : 'audio/mp4') +
+                             '; codecs="' + t.codec + '"';
+                trackInfo[t.id] = { type: kind, mime };
+                mp4box.setSegmentOptions(t.id, null, { nbSamples: 100 });
+              }
+              const initSegs = mp4box.initializeSegmentation();
+              for (const seg of initSegs) {
+                const info = trackInfo[seg.id];
+                if (!info) continue;
+                await waitForBuffer();
+                dc.send(JSON.stringify({ type: 'init', trackId: seg.id, kind: info.type, mime: info.mime }));
+                await waitForBuffer();
+                dc.send(seg.buffer);
+              }
+              mp4box.start();
+            } catch (e) { reject(e); }
+          };
+
+          mp4box.onSegment = (id, user, buffer, sampleNum, last) => {
+            // Queue, wir verarbeiten outside des sync callbacks
+            pendingSegments.push({ id, buffer, last: !!last });
+          };
+
+          // Worker-Loop: drain pendingSegments parallel zum appendBuffer
+          let drainerActive = true;
+          (async () => {
+            while (drainerActive) {
+              if (pendingSegments.length === 0) {
+                await new Promise((r) => setTimeout(r, 20));
+                continue;
+              }
+              const s = pendingSegments.shift();
+              await waitForBuffer();
+              try {
+                dc.send(JSON.stringify({ type: 'segment', trackId: s.id, last: s.last }));
+                dc.send(s.buffer);
+              } catch (e) { reject(e); return; }
+            }
+          })();
+
+          // File chunk-weise an mp4box füttern.
+          const chunkSize = 1 * 1024 * 1024;
+          let off = 0;
+          try {
+            while (off < currentFile.size) {
+              const slice = currentFile.slice(off, Math.min(off + chunkSize, currentFile.size));
+              const buf = await slice.arrayBuffer();
+              buf.fileStart = off;
+              off += buf.byteLength;
+              bytesSent = off;
+              refreshStatus();
+              mp4box.appendBuffer(buf);
+            }
+            mp4box.flush();
+            // Warten bis alle pending Segments durch sind
+            while (pendingSegments.length > 0) {
+              await new Promise((r) => setTimeout(r, 50));
+            }
+            drainerActive = false;
+            resolve();
+          } catch (e) { drainerActive = false; reject(e); }
+        });
       }
     }
 

@@ -357,7 +357,7 @@
     <div class="pair-card" id="pairCard">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · TV · v23</span>
+        <span>Beam · TV · v24</span>
       </div>
       <h1>Mit dem <em>iPhone</em> verbinden.</h1>
       <p class="lede">QR-Code mit der iPhone-Kamera scannen — Beam öffnet sich automatisch mit diesem TV verbunden.</p>
@@ -669,19 +669,26 @@
       }, 30000);
 
       function setupReceiver(dc) {
-        // Sammle Chunks, baue Blob und spiele ab. Funktioniert für alle
-        // Formate die das <video>-Element nativ kann. Größenlimit ~1-1.5 GB
-        // wegen TV-RAM.
+        // MSE-Streaming-Empfänger: für jeden Track (video, audio) wird ein
+        // eigener SourceBuffer im selben MediaSource geöffnet. iPhone sendet
+        // pro Track init-Segment + Media-Segments, jeweils mit trackId.
+        // Fallback: rohe Chunks → Blob (für nicht-MP4-Formate).
         let metadata = null;
-        let blobChunks = [];
         let videoElement = null;
+        let mediaSource = null;
+        let mediaSourceOpen = null; // Promise, fulfilled bei sourceopen
         let totalBytesLocal = 0;
+        const trackBuffers = {}; // { [trackId]: { sb, queue, mime } }
+        let pending = null; // { type, trackId, mime } — nächste binary-Message gehört dazu
+        let blobChunks = [];
+        let mode = 'unknown'; // 'mse' | 'blob'
+        let mseBroken = false;
 
         function buildVideoElement() {
           stage.style.display = 'none';
           player.classList.add('active');
           overlayName.textContent = (metadata && metadata.name) || 'Stream';
-          loadingText.textContent = 'Empfange Datei…';
+          loadingText.textContent = 'Empfange Stream…';
           loadingProgress.textContent = '';
 
           videoMount.innerHTML = '';
@@ -719,13 +726,82 @@
           window.addEventListener('keydown', showOverlay);
         }
 
+        function ensureMediaSource() {
+          if (mediaSource) return mediaSourceOpen;
+          mediaSource = new MediaSource();
+          videoElement.src = URL.createObjectURL(mediaSource);
+          mediaSourceOpen = new Promise((resolve, reject) => {
+            mediaSource.addEventListener('sourceopen', resolve, { once: true });
+            mediaSource.addEventListener('error', reject, { once: true });
+          });
+          return mediaSourceOpen;
+        }
+
+        function appendToBuffer(trackId, buf) {
+          const tb = trackBuffers[trackId];
+          if (!tb) return;
+          tb.queue.push(buf);
+          drainQueue(trackId);
+        }
+
+        function drainQueue(trackId) {
+          const tb = trackBuffers[trackId];
+          if (!tb || !tb.sb || tb.sb.updating || tb.queue.length === 0) return;
+          const buf = tb.queue.shift();
+          try {
+            tb.sb.appendBuffer(buf);
+          } catch (e) {
+            // Wenn appendBuffer wirft (typ. QuotaExceededError oder InvalidStateError),
+            // setze MSE als kaputt und schalte auf Blob-Fallback um.
+            mseBroken = true;
+            setStatus('SourceBuffer-Fehler (' + trackId + '): ' + (e.message || e) + ' — Blob-Fallback', 'err');
+          }
+        }
+
+        async function handleInit(trackId, mime, buffer) {
+          await ensureMediaSource();
+          if (!window.MediaSource || !MediaSource.isTypeSupported(mime)) {
+            mseBroken = true;
+            setStatus('Codec nicht von TV unterstützt: "' + mime + '" — Blob-Fallback aktiviert', 'err');
+            return;
+          }
+          let sb;
+          try {
+            sb = mediaSource.addSourceBuffer(mime);
+          } catch (e) {
+            mseBroken = true;
+            setStatus('addSourceBuffer fehlgeschlagen für "' + mime + '": ' + (e.message || e), 'err');
+            return;
+          }
+          trackBuffers[trackId] = { sb, queue: [], mime };
+          sb.addEventListener('updateend', () => drainQueue(trackId));
+          sb.addEventListener('error', () => {
+            setStatus('SourceBuffer-Error für ' + mime, 'err');
+          });
+          appendToBuffer(trackId, buffer);
+        }
+
         function finalize() {
-          const blob = new Blob(blobChunks, { type: (metadata && metadata.mime) || 'video/mp4' });
-          const url = URL.createObjectURL(blob);
-          videoElement.src = url;
-          videoElement.play().catch(() => {});
-          // Chunks-Array freigeben — Blob hält die Daten
-          blobChunks = [];
+          if (mode === 'blob') {
+            const blob = new Blob(blobChunks, { type: (metadata && metadata.mime) || 'video/mp4' });
+            videoElement.src = URL.createObjectURL(blob);
+            videoElement.play().catch(() => {});
+            blobChunks = [];
+            return;
+          }
+          if (mode === 'mse' && mediaSource && mediaSource.readyState === 'open') {
+            const tryEnd = () => {
+              const allDrained = Object.values(trackBuffers).every(
+                (tb) => tb.sb && !tb.sb.updating && tb.queue.length === 0
+              );
+              if (!allDrained) {
+                setTimeout(tryEnd, 100);
+                return;
+              }
+              try { mediaSource.endOfStream(); } catch {}
+            };
+            tryEnd();
+          }
         }
 
         dc.onmessage = (msg) => {
@@ -740,26 +816,44 @@
                 reportStatus('metadata');
                 buildVideoElement();
                 setStatus('Empfange Stream — 0%…', 'ok');
+              } else if (obj.type === 'init' || obj.type === 'segment') {
+                pending = obj;
+                if (mode === 'unknown') mode = 'mse';
               } else if (obj.type === 'done') {
                 finalize();
               }
             } catch {}
           } else {
-            // Binary chunk → in Blob-Buffer einsammeln
+            // Binary chunk
             const buf = msg.data;
             bytesReceived += buf.byteLength;
-            blobChunks.push(buf);
+
+            if (mode === 'unknown') {
+              // Erstes Binary ohne vorheriges init/segment → roher Stream-Modus
+              mode = 'blob';
+            }
+
+            if (mode === 'mse' && pending && !mseBroken) {
+              if (pending.type === 'init') {
+                handleInit(pending.trackId, pending.mime, buf);
+              } else if (pending.type === 'segment') {
+                appendToBuffer(pending.trackId, buf);
+              }
+              pending = null;
+            } else if (mode === 'blob' || mseBroken) {
+              blobChunks.push(buf);
+            }
+
             if (loading && loading.style.display !== 'none' && totalBytesLocal) {
               const pct = Math.round((bytesReceived / totalBytesLocal) * 100);
-              loadingText.textContent = 'Empfange Datei…';
+              loadingText.textContent = 'Empfange Stream…';
               loadingProgress.textContent = pct + '% · ' + formatBytes(bytesReceived) + ' / ' + formatBytes(totalBytesLocal);
             }
           }
         };
 
         dc.onclose = () => {
-          // Falls iPhone schließt ohne 'done'-Nachricht: trotzdem versuchen abzuspielen
-          if (blobChunks.length > 0 && videoElement && !videoElement.src) {
+          if (mode === 'blob' && blobChunks.length > 0 && videoElement && !videoElement.src) {
             finalize();
           }
         };

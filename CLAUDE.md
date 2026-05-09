@@ -11,7 +11,7 @@ Bei jedem PR die Version um 1 erhöhen — gleichzeitig an allen vier Stellen, s
 3. `sw.js` — `const CACHE = 'beam-shell-vN';` (zwingt SW-Cache-Invalidierung)
 4. `manifest.webmanifest` — `"version": "N"`
 
-Schema: einfacher monoton steigender Integer. Kein Semver, kein Datum. Aktuell **v23**.
+Schema: einfacher monoton steigender Integer. Kein Semver, kein Datum. Aktuell **v24**.
 
 In der PR-Beschreibung den Versions-Bump erwähnen, damit der GitHub-Pages-Deployment-Status nachvollziehbar bleibt.
 
@@ -25,17 +25,19 @@ In der PR-Beschreibung den Versions-Bump erwähnen, damit der GitHub-Pages-Deplo
 
 Externe Libs werden via CDN nachgeladen (lazy beim Klick), nicht eingecheckt:
 - mqtt.js (v5 UMD) für SDP/ICE-Signaling: jsdelivr/unpkg
+- mp4box.js (v0.5.4 UMD) zum Track-weisen Fragmentieren von MP4: jsdelivr/unpkg
 - qrcode-generator: `cdn.jsdelivr.net/npm/qrcode-generator@…/qrcode.js`
 - HLS.js: `cdn.jsdelivr.net/npm/hls.js@…/dist/hls.min.js`
 
-Architektur (ab v23):
-- WebTorrent raus — kein Hashing, keine Tracker, kein Pieces-Verify mehr.
-- MQTT-over-WSS auf `wss://broker.emqx.io:8084/mqtt` für SDP/ICE-Exchange.
-- WebRTC-DataChannel iPhone↔TV für den eigentlichen Stream (LAN-Speed).
-- iPhone sendet rohe File-Chunks (256 KB) via DataChannel mit Backpressure.
-- TV sammelt Chunks in einen Blob, baut beim 'done'-Marker URL.createObjectURL,
-  übergibt's an `<video>`. Funktioniert für alle Formate, die das Video-Element
-  nativ kann. Größenlimit ~1-1.5 GB wegen Tizen-RAM. Für GB-Files: AirPlay nutzen.
+Architektur (ab v24):
+- WebTorrent raus — kein Hashing, keine Tracker.
+- MQTT-WSS auf `wss://broker.emqx.io:8084/mqtt` für SDP/ICE-Exchange.
+- WebRTC-DataChannel iPhone↔TV (LAN-Speed, P2P).
+- iPhone-Seite (für MP4): mp4box.js fragmentiert Track-für-Track, sendet
+  pro Track ein init-Segment + Media-Segments mit trackId und MIME.
+- TV-Seite: pro Track ein eigener SourceBuffer im selben MediaSource —
+  MSE-Streaming ohne komplette RAM-Pufferung, also auch GB-Files.
+- Bei nicht-MP4 oder MSE-Failure: Blob-Fallback (RAM-limitiert).
 
 MQTT-Topics:
 - `beam/{code}/offer` (iPhone publish retained, TV subscribe)
