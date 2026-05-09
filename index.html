@@ -802,7 +802,7 @@
     <header class="header">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · v21</span>
+        <span>Beam · v22</span>
       </div>
       <h1>Vom iPhone <em>auf den Fernseher</em>.</h1>
       <p class="lede">Wähle ein lokales Video oder gib eine URL ein. Mit einem Tipp landet's via AirPlay direkt auf deinem TV.</p>
@@ -1631,31 +1631,34 @@
       });
     }
 
-    let webTorrentLoadPromise = null;
-    function loadWebTorrent(progress) {
-      if (window.WebTorrent) return Promise.resolve();
-      if (webTorrentLoadPromise) return webTorrentLoadPromise;
+    // WebTorrent ist in v22 nicht mehr nötig — Daten gehen direkt
+    // via WebRTC-DataChannel an den TV.
+
+    // mp4box.js — fragmentiert MP4-Dateien on-the-fly zu MSE-tauglichem
+    // fragmented MP4. iPhone-Aufnahmen sind Standard-MP4 mit moov-atom am
+    // Ende (nicht streamable). mp4box.js parst das und gibt fragmentierte
+    // Init+Media-Segments raus, die der TV via MediaSource direkt abspielen kann.
+    let mp4boxLoadPromise = null;
+    function loadMp4box(progress) {
+      if (window.MP4Box) return Promise.resolve();
+      if (mp4boxLoadPromise) return mp4boxLoadPromise;
       const sources = [
-        { name: 'jsdelivr', fn: async () => { await loadScript('https://cdn.jsdelivr.net/npm/webtorrent@1.9.7/webtorrent.min.js'); } },
-        { name: 'unpkg',    fn: async () => { await loadScript('https://unpkg.com/webtorrent@1.9.7/webtorrent.min.js'); } },
-        { name: 'esm.sh',   fn: async () => {
-          const m = await import('https://esm.sh/webtorrent@2.4.1?bundle');
-          window.WebTorrent = m.default || m.WebTorrent;
-        } },
+        { name: 'jsdelivr', fn: async () => { await loadScript('https://cdn.jsdelivr.net/npm/mp4box@0.5.4/dist/mp4box.all.min.js'); } },
+        { name: 'unpkg',    fn: async () => { await loadScript('https://unpkg.com/mp4box@0.5.4/dist/mp4box.all.min.js'); } },
       ];
-      webTorrentLoadPromise = (async () => {
+      mp4boxLoadPromise = (async () => {
         let lastErr;
         for (let i = 0; i < sources.length; i++) {
           const { name, fn } = sources[i];
-          if (progress) progress('WebTorrent via ' + name + ' (' + (i + 1) + '/' + sources.length + ')…');
+          if (progress) progress('mp4box.js via ' + name + ' (' + (i + 1) + '/' + sources.length + ')…');
           try {
-            await withTimeout(fn(), 10000, 'WebTorrent ' + name);
-            if (typeof window.WebTorrent === 'function') return;
+            await withTimeout(fn(), 10000, 'mp4box.js ' + name);
+            if (window.MP4Box && typeof window.MP4Box.createFile === 'function') return;
           } catch (e) { lastErr = e; }
         }
-        throw new Error('WebTorrent konnte nicht geladen werden' + (lastErr ? ': ' + lastErr.message : ''));
+        throw new Error('mp4box.js konnte nicht geladen werden' + (lastErr ? ': ' + lastErr.message : ''));
       })();
-      return webTorrentLoadPromise;
+      return mp4boxLoadPromise;
     }
 
     // Pairing über MQTT-over-WebSocket auf EMQX' öffentlichem Broker.
@@ -1706,15 +1709,20 @@
     function teardownCast() {
       if (!castSession) return;
       try { clearTimeout(castSession.peerHintTimer); } catch {}
-      // Retained Magnet vom Broker entfernen, damit er nicht in einer
-      // späteren Session den TV in die Irre führt. Leere Payload + retain=true = clear.
+      // Retained-Topics vom Broker abräumen, damit sie nächste Session
+      // nicht in die Irre führen (leere Payload + retain=true = clear).
       try {
-        if (castSession.mqttClient && castSession.mqttClient.connected && castSession.magnetTopic) {
-          castSession.mqttClient.publish(castSession.magnetTopic, '', { qos: 1, retain: true });
+        const mc = castSession.mqttClient;
+        const topics = castSession.clearRetained || [];
+        if (mc && mc.connected) {
+          for (const t of topics) {
+            mc.publish(t, '', { qos: 1, retain: true });
+          }
         }
       } catch {}
+      try { castSession.dc && castSession.dc.close(); } catch {}
+      try { castSession.pc && castSession.pc.close(); } catch {}
       try { castSession.mqttClient && castSession.mqttClient.end(true); } catch {}
-      try { castSession.client && castSession.client.destroy(); } catch {}
       castSession = null;
       castProgress.classList.remove('show');
       castProgressBar.style.width = '0';
@@ -1734,7 +1742,7 @@
       castModal.classList.add('open');
       castHostBlock.hidden = isGuest;
       castGuestBlock.hidden = !isGuest;
-      setCastStatus('Lade WebTorrent & trystero…');
+      setCastStatus('Lade Pairing-Bibliotheken…');
       castCodeEl.textContent = '…';
       castCodeEl.classList.add('placeholder');
       castUrlEl.textContent = getReceiverBaseUrl();
@@ -1743,11 +1751,12 @@
       if (isGuest) castGuestCode.textContent = incomingCastCode.match(/.{1,3}/g).join(' ');
 
       try {
-        // Pairing läuft über MQTT-over-WSS (mqtt.js + EMQX public broker).
-        // qrcode-generator nur im Host-Modus für eigenen QR im Modal.
+        // Pairing über MQTT (Signaling) + WebRTC-DataChannel (Daten) +
+        // mp4box.js (on-the-fly Fragmentierung von iPhone-MP4 zu MSE-tauglichem
+        // fragmented MP4). Keine WebTorrent-Hashing-Pause mehr nötig.
         const promises = [
-          loadWebTorrent((s) => setCastStatus('Lade ' + s)),
           loadMqtt((s) => setCastStatus('Lade ' + s)),
+          loadMp4box((s) => setCastStatus('Lade ' + s)),
         ];
         if (!isGuest) promises.push(withTimeout(loadScript('https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js'), 10000, 'qrcode-generator'));
         await Promise.all(promises);
@@ -1774,30 +1783,30 @@
         }
       }
 
-      const client = new window.WebTorrent();
       const mqttUrl = 'wss://broker.emqx.io:8084/mqtt';
-      const magnetTopic = 'beam/' + code.toLowerCase() + '/magnet';
-      const tvStatusTopic = 'beam/' + code.toLowerCase() + '/tvstatus';
+      const baseTopic = 'beam/' + code.toLowerCase();
+      const offerTopic = baseTopic + '/offer';
+      const answerTopic = baseTopic + '/answer';
+      const iceFromIphoneTopic = baseTopic + '/ice/iphone';
+      const iceFromTvTopic = baseTopic + '/ice/tv';
+      const tvStatusTopic = baseTopic + '/tvstatus';
       const clientId = 'beam-iphone-' + Math.random().toString(36).slice(2, 10);
 
-      let tvSeen = false;
       let mqttConnected = false;
-      let magnetReady = false;
-      let magnetPublished = false;
+      let pcConnected = false;
+      let dcOpen = false;
+      let bytesSent = 0;
       let stickyState = '';
 
       function refreshStatus() {
-        if (stickyState === 'tv-playing') return;
-        if (magnetPublished && tvSeen) {
-          setCastStatus('Magnet veröffentlicht — TV sollte gleich laden…', 'ok');
-        } else if (magnetReady && tvSeen) {
-          setCastStatus('TV verbunden, veröffentliche Magnet…', 'ok');
-        } else if (magnetPublished) {
-          setCastStatus('Magnet veröffentlicht (Code ' + code + ') — warte auf TV…');
-        } else if (tvSeen) {
-          setCastStatus('TV verbunden — Datei wird vorbereitet (Hashing)…', 'ok');
+        if (stickyState === 'tv-playing' || stickyState === 'tv-error') return;
+        if (dcOpen) {
+          const pct = Math.min(100, Math.round((bytesSent / currentFile.size) * 100));
+          setCastStatus('Streame an TV — ' + pct + '% (' + formatBytes(bytesSent) + ' / ' + formatBytes(currentFile.size) + ')', 'ok');
+        } else if (pcConnected) {
+          setCastStatus('WebRTC-Verbindung aufgebaut — DataChannel öffnet…', 'ok');
         } else if (mqttConnected) {
-          setCastStatus('Bereit (Code ' + code + ') — MQTT-Kanal offen, warte auf TV…');
+          setCastStatus('Bereit (Code ' + code + ') — MQTT offen, warte auf TV-Antwort…');
         } else {
           setCastStatus('Verbinde zum Pairing-Broker…');
         }
@@ -1805,13 +1814,22 @@
       refreshStatus();
 
       const peerHintTimer = setTimeout(() => {
-        if (tvSeen || magnetPublished) return;
+        if (pcConnected || dcOpen) return;
         const diag = mqttConnected ? '' : ' (MQTT-Broker nicht erreichbar)';
         const hint = isGuest
-          ? 'Kein TV gefunden in 30 s' + diag + '. TV-Seite mit Code ' + code + ' geöffnet?'
-          : 'Kein TV gefunden in 30 s' + diag + '. Auf dem TV ' + baseUrl + ' öffnen, Code ' + code + ' eingeben.';
+          ? 'Kein TV in 30 s' + diag + '. TV-Seite mit Code ' + code + ' geöffnet?'
+          : 'Kein TV in 30 s' + diag + '. Auf dem TV ' + baseUrl + ' öffnen, Code ' + code + ' eingeben.';
         setCastStatus(hint, 'err');
       }, 30000);
+
+      // RTCPeerConnection — STUN-Server für ICE-Discovery, im LAN sollten
+      // host-Kandidaten direkt funktionieren ohne STUN.
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+      });
+
+      const dc = pc.createDataChannel('file', { ordered: true });
+      dc.binaryType = 'arraybuffer';
 
       const mqttClient = window.mqtt.connect(mqttUrl, {
         clientId,
@@ -1820,123 +1838,192 @@
         reconnectPeriod: 3000,
       });
 
-      mqttClient.on('connect', () => {
+      castSession = {
+        code, peerHintTimer, mqttClient, pc, dc,
+        clearRetained: [offerTopic],
+      };
+
+      mqttClient.on('connect', async () => {
         mqttConnected = true;
         refreshStatus();
-        // TV-Status (incl. retain'd "subscribed") empfangen
-        mqttClient.subscribe(tvStatusTopic, { qos: 1 });
+        mqttClient.subscribe([answerTopic, iceFromTvTopic, tvStatusTopic], { qos: 1 });
+
+        // SDP-Offer erstellen und mit retain=true publizieren — damit
+        // ein TV der erst später joint die Offer beim Subscribe sofort bekommt.
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        mqttClient.publish(offerTopic, JSON.stringify(offer), { qos: 1, retain: true });
       });
+
       mqttClient.on('error', (err) => {
-        if (!magnetPublished) setCastStatus('MQTT-Fehler: ' + (err && err.message || err), 'err');
+        if (!dcOpen) setCastStatus('MQTT-Fehler: ' + (err && err.message || err), 'err');
       });
-      mqttClient.on('close', () => {
-        mqttConnected = false;
-      });
-      mqttClient.on('message', (topic, payload) => {
-        if (topic !== tvStatusTopic) return;
+      mqttClient.on('close', () => { mqttConnected = false; });
+
+      mqttClient.on('message', async (topic, payload) => {
+        const text = payload.toString();
+        if (!text) return;
         try {
-          const msg = JSON.parse(payload.toString());
-          if (!msg || typeof msg !== 'object') return;
-          tvSeen = true;
-          clearTimeout(peerHintTimer);
-          const s = msg.state;
-          if (s === 'metadata') setCastStatus('TV hat Metadaten — beginnt zu laden…', 'ok');
-          else if (s === 'playing') { stickyState = 'tv-playing'; setCastStatus('Spielt auf dem TV.', 'ok'); }
-          else if (s === 'buffering') setCastStatus('Puffert auf dem TV…', 'ok');
-          else if (s === 'error') { stickyState = 'tv-error'; setCastStatus('Fehler auf dem TV: ' + (msg.detail || ''), 'err'); }
-          else refreshStatus();
-        } catch {}
-      });
-
-      castSession = { client, code, torrent: null, peerHintTimer, mqttClient, magnetTopic };
-
-      // Während WebTorrent die Datei hashed (kann bei mehreren GB
-      // einige Minuten dauern), Status mit Elapsed-Time und Datei-Größe
-      // aktualisieren — sonst wirkt es wie ein Hänger.
-      const hashStart = Date.now();
-      const sizeStr = formatBytes(currentFile.size);
-      const hashTimer = setInterval(() => {
-        if (magnetReady || !castSession) { clearInterval(hashTimer); return; }
-        if (stickyState === 'tv-playing' || stickyState === 'tv-error') {
-          clearInterval(hashTimer);
-          return;
-        }
-        const elapsed = Math.round((Date.now() - hashStart) / 1000);
-        let pieceInfo = '';
-        try {
-          const t = castSession && castSession.torrent;
-          if (t && Array.isArray(t.pieces) && t.pieces.length > 0) {
-            const hashed = t.pieces.filter((p) => p != null).length;
-            const total = t.pieces.length;
-            const pct = Math.round((hashed / total) * 100);
-            if (total > 0) pieceInfo = ' — ' + pct + '%';
-          }
-        } catch {}
-        const prefix = tvSeen ? 'TV verbunden — ' : '';
-        let suffix = '';
-        if (elapsed > 90) suffix = ' (lange! Datei evtl. zu groß für iPhone-Browser)';
-        else if (elapsed > 30) suffix = ' (großes File braucht länger)';
-        setCastStatus(prefix + 'Hashing ' + sizeStr + ' — ' + elapsed + ' s' + pieceInfo + suffix + '…', tvSeen ? 'ok' : '');
-      }, 1000);
-
-      // Datei in den WebTorrent-Swarm
-      const opts = {
-        announce: [
-          'wss://tracker.openwebtorrent.com',
-          'wss://tracker.btorrent.xyz',
-          'wss://tracker.webtorrent.dev',
-        ],
-      };
-      const seedingTorrent = client.seed(currentFile, opts, (torrent) => {
-        clearInterval(hashTimer);
-        castSession.torrent = torrent;
-        magnetReady = true;
-        refreshStatus();
-        setCastMeta([
-          ['Datei', currentFile.name],
-          ['Größe', formatBytes(currentFile.size)],
-          ['InfoHash', torrent.infoHash.slice(0, 16) + '…'],
-          ['Tracker', String(torrent.announce.length)],
-        ]);
-
-        // Magnet einmal mit retain=true publizieren. Der Broker hält die
-        // Nachricht auf dem Topic, sodass auch ein TV der erst später joint
-        // sie sofort beim Subscribe bekommt. Kein Repost-Loop nötig.
-        const payload = JSON.stringify({
-          magnet: torrent.magnetURI,
-          name: currentFile.name,
-          size: currentFile.size,
-          mime: currentFile.type || '',
-          ts: Date.now(),
-        });
-        const publish = () => {
-          if (!mqttConnected) {
-            // Warten bis MQTT-Broker connected ist
-            setTimeout(publish, 500);
-            return;
-          }
-          mqttClient.publish(magnetTopic, payload, { qos: 1, retain: true }, (err) => {
-            if (err) {
-              setCastStatus('MQTT-Publish fehlgeschlagen: ' + (err.message || err), 'err');
-            } else {
-              magnetPublished = true;
-              refreshStatus();
+          if (topic === answerTopic) {
+            const answer = JSON.parse(text);
+            if (pc.signalingState === 'have-local-offer') {
+              await pc.setRemoteDescription(answer);
             }
-          });
-        };
-        publish();
-
-        torrent.on('upload', () => {
-          const sent = torrent.uploaded;
-          const pct = Math.min(100, Math.round((sent / currentFile.size) * 100));
-          castProgress.classList.add('show');
-          castProgressBar.style.width = pct + '%';
-          setCastStatus('Streamt an TV — ' + formatBytes(sent) + ' gesendet', 'ok');
-        });
+          } else if (topic === iceFromTvTopic) {
+            const candidate = JSON.parse(text);
+            await pc.addIceCandidate(candidate);
+          } else if (topic === tvStatusTopic) {
+            const msg = JSON.parse(text);
+            if (!msg || typeof msg !== 'object') return;
+            const s = msg.state;
+            if (s === 'metadata') setCastStatus('TV hat Metadaten — beginnt zu laden…', 'ok');
+            else if (s === 'playing') { stickyState = 'tv-playing'; setCastStatus('Spielt auf dem TV.', 'ok'); }
+            else if (s === 'buffering') setCastStatus('Puffert auf dem TV…', 'ok');
+            else if (s === 'error') { stickyState = 'tv-error'; setCastStatus('Fehler auf dem TV: ' + (msg.detail || ''), 'err'); }
+          }
+        } catch (e) {
+          // ignore parse errors
+        }
       });
-      // Sofort nach Aufruf von client.seed das WIP-torrent-Objekt halten,
-      // damit der hashTimer den pieces-Counter lesen kann.
-      castSession.torrent = seedingTorrent;
+
+      pc.onicecandidate = (e) => {
+        if (e.candidate && mqttConnected) {
+          mqttClient.publish(iceFromIphoneTopic, JSON.stringify(e.candidate), { qos: 1 });
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'connected') {
+          pcConnected = true;
+          clearTimeout(peerHintTimer);
+          refreshStatus();
+        } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+          if (!dcOpen) setCastStatus('WebRTC-Verbindung fehlgeschlagen — Netzwerk prüfen.', 'err');
+        }
+      };
+
+      dc.onopen = () => {
+        dcOpen = true;
+        clearTimeout(peerHintTimer);
+        refreshStatus();
+        startSendingFile();
+      };
+
+      dc.onerror = (e) => {
+        setCastStatus('DataChannel-Fehler: ' + (e && e.message || e), 'err');
+      };
+
+      setCastMeta([
+        ['Datei', currentFile.name],
+        ['Größe', formatBytes(currentFile.size)],
+        ['Typ', currentFile.type || 'unbekannt'],
+      ]);
+
+      // Datei in fragmentierte MP4-Segments umwandeln und chunk-weise
+      // über den DataChannel an den TV senden.
+      async function startSendingFile() {
+        try {
+          // Metadata an TV
+          dc.send(JSON.stringify({
+            type: 'metadata',
+            name: currentFile.name,
+            size: currentFile.size,
+            mime: currentFile.type || 'video/mp4',
+          }));
+
+          // Bei MP4: mp4box.js zur On-the-fly-Fragmentierung nutzen.
+          // Bei anderen Formaten: roh durchreichen (TV macht Blob-Fallback).
+          const isMp4 = /\.(mp4|m4v|mov)$/i.test(currentFile.name) ||
+                        /^video\/(mp4|quicktime)/i.test(currentFile.type);
+          if (isMp4 && window.MP4Box) {
+            await sendAsFragmentedMp4();
+          } else {
+            await sendRawChunks();
+          }
+          dc.send(JSON.stringify({ type: 'done' }));
+        } catch (e) {
+          setCastStatus('Senden fehlgeschlagen: ' + (e && e.message || e), 'err');
+        }
+      }
+
+      async function waitForBufferDrain() {
+        // Backpressure: warte wenn DataChannel-Buffer zu voll
+        while (dc.bufferedAmount > 8 * 1024 * 1024) {
+          await new Promise((r) => setTimeout(r, 50));
+        }
+      }
+
+      async function sendRawChunks() {
+        const chunkSize = 256 * 1024;
+        for (let off = 0; off < currentFile.size; off += chunkSize) {
+          await waitForBufferDrain();
+          const slice = currentFile.slice(off, Math.min(off + chunkSize, currentFile.size));
+          const buf = await slice.arrayBuffer();
+          dc.send(buf);
+          bytesSent += buf.byteLength;
+          if (off % (chunkSize * 16) === 0) refreshStatus();
+        }
+        refreshStatus();
+      }
+
+      // mp4box.js fragmentiert das MP4 on-the-fly: Init-Segment + Media-Segments,
+      // beide MSE-tauglich. Wir lesen das File chunk-weise via File.slice +
+      // arrayBuffer (kein FileReader → kein OOM bei großen Files).
+      async function sendAsFragmentedMp4() {
+        const mp4box = window.MP4Box.createFile();
+        let offset = 0;
+        let fragMime = 'video/mp4; codecs="avc1.42E01E,mp4a.40.2"';
+        let initSegSent = false;
+        let pendingTrackId = null;
+
+        await new Promise((resolve, reject) => {
+          mp4box.onError = (err) => reject(new Error('mp4box: ' + err));
+          mp4box.onReady = (info) => {
+            const codecs = info.tracks.map((t) => t.codec).filter(Boolean).join(',');
+            if (codecs) fragMime = 'video/mp4; codecs="' + codecs + '"';
+            // Erstelle ein einzelnes fragmentiertes Track-Set
+            for (const track of info.tracks) {
+              mp4box.setSegmentOptions(track.id, null, { nbSamples: 1000 });
+              pendingTrackId = track.id;
+            }
+            const initSegs = mp4box.initializeSegmentation();
+            // Jedes initSegs[i].buffer ist ein ArrayBuffer mit dem Init-Segment
+            for (const seg of initSegs) {
+              dc.send(JSON.stringify({ type: 'init', mime: fragMime, trackId: seg.id }));
+              dc.send(seg.buffer);
+            }
+            initSegSent = true;
+            mp4box.start();
+          };
+          mp4box.onSegment = (id, user, buffer, sampleNum, last) => {
+            // jeden Media-Segment chunk an TV senden
+            (async () => {
+              await waitForBufferDrain();
+              dc.send(JSON.stringify({ type: 'segment', trackId: id, last: !!last }));
+              dc.send(buffer);
+            })().catch(reject);
+          };
+
+          // File chunk-weise an mp4box füttern
+          (async () => {
+            const chunkSize = 1 * 1024 * 1024; // 1 MB
+            try {
+              while (offset < currentFile.size) {
+                const slice = currentFile.slice(offset, Math.min(offset + chunkSize, currentFile.size));
+                const buf = await slice.arrayBuffer();
+                buf.fileStart = offset;
+                offset += buf.byteLength;
+                bytesSent = offset;
+                refreshStatus();
+                mp4box.appendBuffer(buf);
+                // mp4box's onSegment-Callback feuert während appendBuffer
+              }
+              mp4box.flush();
+              resolve();
+            } catch (e) { reject(e); }
+          })();
+        });
+      }
     }
 
     function copyCastUrl() {
