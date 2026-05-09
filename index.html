@@ -802,7 +802,7 @@
     <header class="header">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · v19</span>
+        <span>Beam · v20</span>
       </div>
       <h1>Vom iPhone <em>auf den Fernseher</em>.</h1>
       <p class="lede">Wähle ein lokales Video oder gib eine URL ein. Mit einem Tipp landet's via AirPlay direkt auf deinem TV.</p>
@@ -1850,6 +1850,31 @@
 
       castSession = { client, code, torrent: null, peerHintTimer, mqttClient, magnetTopic };
 
+      // Während WebTorrent die Datei hashed (kann bei mehreren GB
+      // einige Minuten dauern), Status mit Elapsed-Time und ggf. Pieces-
+      // Fortschritt aktualisieren — sonst wirkt es wie ein Hänger.
+      const hashStart = Date.now();
+      const hashTimer = setInterval(() => {
+        if (magnetReady || !castSession) { clearInterval(hashTimer); return; }
+        if (stickyState === 'tv-playing' || stickyState === 'tv-error') {
+          clearInterval(hashTimer);
+          return;
+        }
+        const elapsed = Math.round((Date.now() - hashStart) / 1000);
+        let pieceInfo = '';
+        try {
+          const t = castSession && castSession.torrent;
+          if (t && Array.isArray(t.pieces) && t.pieces.length > 0) {
+            const hashed = t.pieces.filter((p) => p != null).length;
+            const total = t.pieces.length;
+            const pct = Math.round((hashed / total) * 100);
+            if (total > 0) pieceInfo = ' — ' + pct + '% (' + hashed + '/' + total + ')';
+          }
+        } catch {}
+        const prefix = tvSeen ? 'TV verbunden — ' : '';
+        setCastStatus(prefix + 'Datei wird vorbereitet (' + elapsed + ' s' + pieceInfo + ')…', tvSeen ? 'ok' : '');
+      }, 1000);
+
       // Datei in den WebTorrent-Swarm
       const opts = {
         announce: [
@@ -1858,7 +1883,8 @@
           'wss://tracker.webtorrent.dev',
         ],
       };
-      client.seed(currentFile, opts, (torrent) => {
+      const seedingTorrent = client.seed(currentFile, opts, (torrent) => {
+        clearInterval(hashTimer);
         castSession.torrent = torrent;
         magnetReady = true;
         refreshStatus();
@@ -1904,6 +1930,9 @@
           setCastStatus('Streamt an TV — ' + formatBytes(sent) + ' gesendet', 'ok');
         });
       });
+      // Sofort nach Aufruf von client.seed das WIP-torrent-Objekt halten,
+      // damit der hashTimer den pieces-Counter lesen kann.
+      castSession.torrent = seedingTorrent;
     }
 
     function copyCastUrl() {
