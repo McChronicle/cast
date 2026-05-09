@@ -259,7 +259,7 @@
     <div class="pair-card" id="pairCard">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · TV · v5</span>
+        <span>Beam · TV · v6</span>
       </div>
       <h1>Code vom <em>iPhone</em> eingeben.</h1>
       <p class="lede">Auf deinem iPhone in Beam ein Video laden, „Per Code an Samsung-TV" tippen, dann den 6-stelligen Code hier eintippen.</p>
@@ -374,10 +374,6 @@
           const m = await import('https://esm.sh/webtorrent@2.4.1?bundle');
           window.WebTorrent = m.default || m.WebTorrent;
         },
-        async () => {
-          const m = await import('https://cdn.jsdelivr.net/npm/webtorrent@2.4.1/+esm');
-          window.WebTorrent = m.default || m.WebTorrent;
-        },
       ];
       webTorrentLoadPromise = (async () => {
         let lastErr;
@@ -392,60 +388,81 @@
       return webTorrentLoadPromise;
     }
 
+    let trysteroLoadPromise = null;
+    function loadTrystero() {
+      if (window.__trystero) return Promise.resolve(window.__trystero);
+      if (trysteroLoadPromise) return trysteroLoadPromise;
+      const sources = [
+        () => import('https://esm.sh/trystero@0.20.0/torrent'),
+        () => import('https://esm.sh/trystero@0.21.5/torrent'),
+      ];
+      trysteroLoadPromise = (async () => {
+        let lastErr;
+        for (const fn of sources) {
+          try {
+            const mod = await fn();
+            if (typeof mod.joinRoom === 'function') {
+              window.__trystero = mod;
+              return mod;
+            }
+          } catch (e) { lastErr = e; }
+        }
+        throw new Error('trystero konnte nicht geladen werden' + (lastErr ? ': ' + lastErr.message : ''));
+      })();
+      return trysteroLoadPromise;
+    }
+
     let session = null;
+    let reportStatus = () => {};
 
     async function connect(code) {
       pairBtn.disabled = true;
-      setStatus('Lade WebTorrent & PeerJS…');
+      setStatus('Lade WebTorrent & trystero…');
+      let trystero;
       try {
-        await Promise.all([
+        const [, ts] = await Promise.all([
           loadWebTorrent(),
-          loadScript('https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js'),
+          loadTrystero(),
         ]);
+        trystero = ts;
       } catch (e) {
         setStatus(e.message || 'Bibliotheken konnten nicht geladen werden.', 'err');
         pairBtn.disabled = false;
         return;
       }
 
-      setStatus('Verbinde mit Pairing-Server…');
+      setStatus('Trete Pairing-Room bei…');
 
-      const peer = new window.Peer({ debug: 0 });
-      const peerHostId = 'beam-' + code.toLowerCase();
-      session = { peer, conn: null, client: null, torrent: null };
+      const room = trystero.joinRoom({ appId: 'beam-cast' }, code.toLowerCase());
+      const [sendStatus] = room.makeAction('status');
+      const [, getMagnet] = room.makeAction('magnet');
+      session = { room, client: null, torrent: null };
+      reportStatus = (state, detail) => {
+        try { sendStatus({ state, detail }); } catch {}
+      };
 
-      peer.on('error', (err) => {
-        const msg = (err && err.type) ? err.type : (err && err.message) || String(err);
-        if (msg === 'peer-unavailable') {
-          setStatus('Kein Sender mit diesem Code aktiv. Code prüfen.', 'err');
-        } else {
-          setStatus('Pairing-Fehler: ' + msg, 'err');
+      let gotMagnet = false;
+      room.onPeerJoin(() => {
+        if (!gotMagnet) setStatus('Sender verbunden — warte auf Magnet…', 'ok');
+      });
+      room.onPeerLeave(() => {
+        if (!gotMagnet) setStatus('Sender hat den Room verlassen.', 'err');
+      });
+
+      getMagnet((msg) => {
+        if (!msg || typeof msg !== 'object' || !msg.magnet) return;
+        gotMagnet = true;
+        setStatus('Magnet erhalten — starte Stream…', 'ok');
+        startTorrent(msg);
+      });
+
+      // Falls nach 30 s noch kein Sender aufgetaucht ist: Hinweis
+      setTimeout(() => {
+        if (!gotMagnet && session && session.room === room) {
+          setStatus('Kein Sender gefunden. Code prüfen oder erneut tippen.', 'err');
+          pairBtn.disabled = false;
         }
-        pairBtn.disabled = false;
-      });
-
-      peer.on('open', () => {
-        setStatus('Mit Sender verbinden…');
-        const conn = peer.connect(peerHostId, { reliable: true });
-        session.conn = conn;
-        conn.on('open', () => {
-          setStatus('Verbunden — warte auf Magnet-Link…', 'ok');
-        });
-        conn.on('data', (msg) => {
-          if (!msg || typeof msg !== 'object') return;
-          if (msg.type === 'magnet' && msg.magnet) {
-            setStatus('Magnet erhalten — starte Stream…', 'ok');
-            startTorrent(msg);
-          }
-        });
-        conn.on('close', () => {
-          // Verbindung weg ist nach Magnet-Empfang okay (Stream läuft via WebTorrent direkt)
-        });
-      });
-
-      function reportStatus(state, detail) {
-        try { session && session.conn && session.conn.send({ type: 'status', state, detail }); } catch {}
-      }
+      }, 30000);
 
       function startTorrent(meta) {
         stage.style.display = 'none';
@@ -551,7 +568,7 @@
 
     window.addEventListener('beforeunload', () => {
       try { session && session.client && session.client.destroy(); } catch {}
-      try { session && session.peer && session.peer.destroy(); } catch {}
+      try { session && session.room && session.room.leave && session.room.leave(); } catch {}
     });
   </script>
 </body>

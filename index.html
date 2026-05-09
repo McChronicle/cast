@@ -772,7 +772,7 @@
     <header class="header">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · v5</span>
+        <span>Beam · v6</span>
       </div>
       <h1>Vom iPhone <em>auf den Fernseher</em>.</h1>
       <p class="lede">Wähle ein lokales Video oder gib eine URL ein. Mit einem Tipp landet's via AirPlay direkt auf deinem TV.</p>
@@ -1549,17 +1549,11 @@
     function loadWebTorrent() {
       if (window.WebTorrent) return Promise.resolve();
       if (webTorrentLoadPromise) return webTorrentLoadPromise;
-      // Reihenfolge: erst v1.x UMD (klassisches <script>, am zuverlässigsten),
-      // dann v2 ESM via esm.sh / jsdelivr +esm als Fallback.
       const sources = [
         async () => { await loadScript('https://cdn.jsdelivr.net/npm/webtorrent@1.9.7/webtorrent.min.js'); },
         async () => { await loadScript('https://unpkg.com/webtorrent@1.9.7/webtorrent.min.js'); },
         async () => {
           const m = await import('https://esm.sh/webtorrent@2.4.1?bundle');
-          window.WebTorrent = m.default || m.WebTorrent;
-        },
-        async () => {
-          const m = await import('https://cdn.jsdelivr.net/npm/webtorrent@2.4.1/+esm');
           window.WebTorrent = m.default || m.WebTorrent;
         },
       ];
@@ -1574,6 +1568,32 @@
         throw new Error('WebTorrent konnte nicht geladen werden' + (lastErr ? ': ' + lastErr.message : ''));
       })();
       return webTorrentLoadPromise;
+    }
+
+    // trystero: Pairing über BitTorrent-Tracker statt eigenem Signaling-Server.
+    // Nutzt dieselbe Infrastruktur wie WebTorrent — wenn Daten gehen, geht auch Pairing.
+    let trysteroLoadPromise = null;
+    function loadTrystero() {
+      if (window.__trystero) return Promise.resolve(window.__trystero);
+      if (trysteroLoadPromise) return trysteroLoadPromise;
+      const sources = [
+        () => import('https://esm.sh/trystero@0.20.0/torrent'),
+        () => import('https://esm.sh/trystero@0.21.5/torrent'),
+      ];
+      trysteroLoadPromise = (async () => {
+        let lastErr;
+        for (const fn of sources) {
+          try {
+            const mod = await fn();
+            if (typeof mod.joinRoom === 'function') {
+              window.__trystero = mod;
+              return mod;
+            }
+          } catch (e) { lastErr = e; }
+        }
+        throw new Error('trystero konnte nicht geladen werden' + (lastErr ? ': ' + lastErr.message : ''));
+      })();
+      return trysteroLoadPromise;
     }
 
     function setCastStatus(text, kind = '') {
@@ -1594,7 +1614,7 @@
     let castSession = null;
     function teardownCast() {
       if (!castSession) return;
-      try { castSession.peer && castSession.peer.destroy(); } catch {}
+      try { castSession.room && castSession.room.leave && castSession.room.leave(); } catch {}
       try { castSession.client && castSession.client.destroy(); } catch {}
       castSession = null;
       castProgress.classList.remove('show');
@@ -1612,28 +1632,27 @@
         return;
       }
       castModal.classList.add('open');
-      setCastStatus('Lade WebTorrent & PeerJS…');
+      setCastStatus('Lade WebTorrent & trystero…');
       castCodeEl.textContent = '…';
       castCodeEl.classList.add('placeholder');
       castUrlEl.textContent = getReceiverBaseUrl();
       castQr.innerHTML = '';
       castMeta.innerHTML = '';
 
+      let trystero;
       try {
-        // WebTorrent gibt's seit v2 nur als ESM — daher dynamischer Import.
-        // PeerJS und qrcode-generator als klassische UMD-Skripte.
-        await Promise.all([
+        const [, ts] = await Promise.all([
           loadWebTorrent(),
-          loadScript('https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js'),
+          loadTrystero(),
           loadScript('https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js'),
         ]);
+        trystero = ts;
       } catch (e) {
         setCastStatus(e.message || 'Bibliotheken konnten nicht geladen werden.', 'err');
         return;
       }
 
       const code = genCastCode();
-      const peerId = 'beam-' + code.toLowerCase();
       const baseUrl = getReceiverBaseUrl();
       const tvUrl = baseUrl + '?code=' + code;
 
@@ -1642,7 +1661,6 @@
       castUrlEl.textContent = baseUrl;
 
       try {
-        // qrcode-generator: type=0 (auto), 'M' = mittlere Fehlerkorrektur
         const qr = window.qrcode(0, 'M');
         qr.addData(tvUrl);
         qr.make();
@@ -1651,93 +1669,79 @@
         castQr.innerHTML = '<span style="color:#888;font-size:12px">QR konnte nicht erzeugt werden</span>';
       }
 
-      setCastStatus('Verbinde mit Pairing-Server…');
+      setCastStatus('Trete Pairing-Room bei…');
 
-      const peer = new window.Peer(peerId, { debug: 0 });
       const client = new window.WebTorrent();
+      const room = trystero.joinRoom({ appId: 'beam-cast' }, code.toLowerCase());
+      const [sendMagnet] = room.makeAction('magnet');
+      const [, getStatus] = room.makeAction('status');
 
-      castSession = { peer, client, code };
+      castSession = { room, client, code, torrent: null };
 
-      peer.on('error', (err) => {
-        const msg = (err && err.type) ? err.type : (err && err.message) || String(err);
-        if (msg === 'unavailable-id') {
-          // selten — Code-Kollision; einmal neu versuchen
-          teardownCast();
-          startCast();
+      // Status vom TV einsammeln
+      getStatus((msg) => {
+        if (!msg || typeof msg !== 'object') return;
+        const s = msg.state;
+        if (s === 'metadata') setCastStatus('TV hat Metadaten — beginnt zu laden…', 'ok');
+        else if (s === 'playing') setCastStatus('Spielt auf dem TV.', 'ok');
+        else if (s === 'buffering') setCastStatus('Puffert auf dem TV…', 'ok');
+        else if (s === 'error') setCastStatus('Fehler auf dem TV: ' + (msg.detail || ''), 'err');
+      });
+
+      // TV tritt dem Pairing-Room bei → Magnet senden
+      room.onPeerJoin((peerId) => {
+        setCastStatus('TV verbindet sich — sende Magnet…', 'ok');
+        trySendMagnet(peerId);
+      });
+      room.onPeerLeave(() => {
+        setCastStatus('Verbindung zum TV getrennt.');
+      });
+
+      function trySendMagnet(peerId) {
+        const t = castSession && castSession.torrent;
+        if (!t) {
+          // Torrent noch nicht bereit — gleich nochmal versuchen
+          setTimeout(() => {
+            if (castSession && castSession.room === room) trySendMagnet(peerId);
+          }, 250);
           return;
         }
-        setCastStatus('Pairing-Fehler: ' + msg, 'err');
-      });
-
-      peer.on('open', () => {
-        setCastStatus('Bereit — warte auf Verbindung vom TV…');
-        seedFile();
-      });
-
-      function seedFile() {
-        const opts = {
-          announce: [
-            'wss://tracker.openwebtorrent.com',
-            'wss://tracker.btorrent.xyz',
-            'wss://tracker.webtorrent.dev',
-          ],
-        };
-        client.seed(currentFile, opts, (torrent) => {
-          castSession.torrent = torrent;
-          setCastMeta([
-            ['Datei', currentFile.name],
-            ['Größe', formatBytes(currentFile.size)],
-            ['InfoHash', torrent.infoHash.slice(0, 16) + '…'],
-            ['Tracker', String(torrent.announce.length)],
-          ]);
-          torrent.on('upload', () => {
-            const sent = torrent.uploaded;
-            const pct = Math.min(100, Math.round((sent / currentFile.size) * 100));
-            castProgress.classList.add('show');
-            castProgressBar.style.width = pct + '%';
-            setCastStatus('Streamt an TV — ' + formatBytes(sent) + ' gesendet', 'ok');
-          });
-        });
-      }
-
-      peer.on('connection', (conn) => {
-        setCastStatus('TV verbindet sich…');
-        conn.on('open', () => {
-          const t = castSession && castSession.torrent;
-          const payload = {
-            type: 'magnet',
-            magnet: t ? t.magnetURI : null,
+        try {
+          sendMagnet({
+            magnet: t.magnetURI,
             name: currentFile.name,
             size: currentFile.size,
             mime: currentFile.type || '',
-          };
-          if (!t) {
-            // Torrent noch nicht bereit — auf "ready" warten und dann senden
-            const send = () => conn.send(payload);
-            const i = setInterval(() => {
-              if (castSession && castSession.torrent) {
-                payload.magnet = castSession.torrent.magnetURI;
-                send();
-                clearInterval(i);
-              }
-            }, 200);
-          } else {
-            conn.send(payload);
-          }
-          setCastStatus('TV verbunden, lädt Metadaten…', 'ok');
-        });
-        conn.on('data', (msg) => {
-          if (!msg || typeof msg !== 'object') return;
-          if (msg.type === 'status') {
-            const s = msg.state;
-            if (s === 'metadata') setCastStatus('TV hat Metadaten — beginnt zu laden…', 'ok');
-            else if (s === 'playing') setCastStatus('Spielt auf dem TV.', 'ok');
-            else if (s === 'buffering') setCastStatus('Puffert auf dem TV…', 'ok');
-            else if (s === 'error') setCastStatus('Fehler auf dem TV: ' + (msg.detail || ''), 'err');
-          }
-        });
-        conn.on('close', () => {
-          setCastStatus('Verbindung zum TV getrennt.');
+          }, peerId);
+          setCastStatus('Magnet zugestellt — TV lädt jetzt…', 'ok');
+        } catch (e) {
+          setCastStatus('Senden fehlgeschlagen: ' + (e.message || e), 'err');
+        }
+      }
+
+      // Datei in den WebTorrent-Swarm
+      const opts = {
+        announce: [
+          'wss://tracker.openwebtorrent.com',
+          'wss://tracker.btorrent.xyz',
+          'wss://tracker.webtorrent.dev',
+        ],
+      };
+      setCastStatus('Bereit — warte auf Verbindung vom TV…');
+      client.seed(currentFile, opts, (torrent) => {
+        castSession.torrent = torrent;
+        setCastMeta([
+          ['Datei', currentFile.name],
+          ['Größe', formatBytes(currentFile.size)],
+          ['InfoHash', torrent.infoHash.slice(0, 16) + '…'],
+          ['Tracker', String(torrent.announce.length)],
+        ]);
+        torrent.on('upload', () => {
+          const sent = torrent.uploaded;
+          const pct = Math.min(100, Math.round((sent / currentFile.size) * 100));
+          castProgress.classList.add('show');
+          castProgressBar.style.width = pct + '%';
+          setCastStatus('Streamt an TV — ' + formatBytes(sent) + ' gesendet', 'ok');
         });
       });
     }
