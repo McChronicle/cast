@@ -357,7 +357,7 @@
     <div class="pair-card" id="pairCard">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · TV · v12</span>
+        <span>Beam · TV · v13</span>
       </div>
       <h1>Mit dem <em>iPhone</em> verbinden.</h1>
       <p class="lede">QR-Code mit der iPhone-Kamera scannen — Beam öffnet sich automatisch mit diesem TV verbunden.</p>
@@ -551,45 +551,30 @@
       return webTorrentLoadPromise;
     }
 
-    // trystero: Pairing über MQTT (HiveMQ public broker). Nostr war zu
-    // asymmetrisch zwischen iPhone und TV. Ein gemeinsamer WSS-Broker
-    // garantiert, dass beide Seiten denselben Rendezvous-Punkt sehen.
-    let trysteroLoadPromise = null;
-    function loadTrystero(progress) {
-      if (window.__trystero) return Promise.resolve(window.__trystero);
-      if (trysteroLoadPromise) return trysteroLoadPromise;
-      // WICHTIG: dieselbe Liste, dieselbe Reihenfolge wie index.html.
-      // relayUrls explizit, damit iPhone und TV garantiert denselben Broker nutzen.
+    // PeerJS für Pairing — ID-basiertes Routing über 0.peerjs.com.
+    // TV verbindet direkt zur Host-ID "beam-{code}", die das iPhone
+    // registriert hat. Kein Topic-Discovery, kein Broker-Mismatch.
+    let peerJsLoadPromise = null;
+    function loadPeerJS(progress) {
+      if (window.Peer) return Promise.resolve();
+      if (peerJsLoadPromise) return peerJsLoadPromise;
       const sources = [
-        {
-          name: 'mqtt@0.21.5',
-          fn: () => import('https://esm.sh/trystero@0.21.5/mqtt'),
-          relayUrls: ['wss://broker.emqx.io:8084/mqtt'],
-        },
-        {
-          name: 'nostr@0.21.5',
-          fn: () => import('https://esm.sh/trystero@0.21.5/nostr'),
-          relayUrls: ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.nostr.band'],
-        },
+        { name: 'jsdelivr', fn: async () => { await loadScript('https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js'); } },
+        { name: 'unpkg',    fn: async () => { await loadScript('https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js'); } },
       ];
-      trysteroLoadPromise = (async () => {
+      peerJsLoadPromise = (async () => {
         let lastErr;
         for (let i = 0; i < sources.length; i++) {
-          const src = sources[i];
-          if (progress) progress('trystero via ' + src.name + ' (' + (i + 1) + '/' + sources.length + ')…');
+          const { name, fn } = sources[i];
+          if (progress) progress('PeerJS via ' + name + ' (' + (i + 1) + '/' + sources.length + ')…');
           try {
-            const mod = await withTimeout(src.fn(), 10000, 'trystero ' + src.name);
-            if (typeof mod.joinRoom === 'function') {
-              window.__trystero = mod;
-              window.__trysteroName = src.name;
-              window.__trysteroRelays = src.relayUrls;
-              return mod;
-            }
+            await withTimeout(fn(), 10000, 'PeerJS ' + name);
+            if (typeof window.Peer === 'function') return;
           } catch (e) { lastErr = e; }
         }
-        throw new Error('trystero konnte nicht geladen werden' + (lastErr ? ': ' + lastErr.message : ''));
+        throw new Error('PeerJS konnte nicht geladen werden' + (lastErr ? ': ' + lastErr.message : ''));
       })();
-      return trysteroLoadPromise;
+      return peerJsLoadPromise;
     }
 
     let session = null;
@@ -598,74 +583,77 @@
     function disconnectSession() {
       if (!session) return;
       try { session.client && session.client.destroy(); } catch {}
-      try { session.room && session.room.leave && session.room.leave(); } catch {}
+      try { session.peer && session.peer.destroy(); } catch {}
       session = null;
     }
 
     async function connect(code) {
       // Falls schon eine Session läuft (z. B. QR-Auto + manueller Override),
-      // erst sauber abbauen, dann neu beitreten.
+      // erst sauber abbauen, dann neu verbinden.
       disconnectSession();
       pairBtn.disabled = true;
-      setStatus('Lade WebTorrent & trystero…');
-      let trystero;
+      setStatus('Lade WebTorrent & PeerJS…');
       try {
-        const [, ts] = await Promise.all([
+        await Promise.all([
           loadWebTorrent((s) => setStatus('Lade ' + s)),
-          loadTrystero((s) => setStatus('Lade ' + s)),
+          loadPeerJS((s) => setStatus('Lade ' + s)),
         ]);
-        trystero = ts;
       } catch (e) {
         setStatus(e.message || 'Bibliotheken konnten nicht geladen werden.', 'err');
         pairBtn.disabled = false;
         return;
       }
 
-      setStatus('Trete Pairing-Room bei…');
+      setStatus('Verbinde zu Pairing-Server…');
 
-      const room = trystero.joinRoom({
-        appId: 'beam-cast',
-        relayUrls: window.__trysteroRelays,
-      }, code.toLowerCase());
-      const [sendStatus] = room.makeAction('status');
-      const [, getMagnet] = room.makeAction('magnet');
-      session = { room, client: null, torrent: null };
+      const hostId = 'beam-' + code.toLowerCase();
+      // Anonyme ID — der TV ist Client, Host-ID ist die Code-basierte
+      const peer = new window.Peer({ debug: 1 });
+      let conn = null;
+      let gotMagnet = false;
+      session = { peer, conn: null, client: null, torrent: null };
       reportStatus = (state, detail) => {
-        try { sendStatus({ state, detail }); } catch {}
+        try { conn && conn.open && conn.send({ state, detail }); } catch {}
       };
 
-      // Trystero meldet keinen "ready"-Event — wir gehen davon aus,
-      // dass der Room sofort offen ist und der Tracker-Announce im Hintergrund läuft.
-      setStatus('Im Pairing-Room als Code ' + code + ' via ' + (window.__trysteroName || '?') + ' — bereit für iPhone.', 'ok');
-
-      let peerSeen = false;
-      let gotMagnet = false;
-      room.onPeerJoin(() => {
-        peerSeen = true;
-        if (!gotMagnet) setStatus('iPhone verbunden — warte auf Magnet…', 'ok');
+      peer.on('open', () => {
+        setStatus('Verbinde zu iPhone (Code ' + code + ')…', 'ok');
+        conn = peer.connect(hostId, { reliable: true });
+        session.conn = conn;
+        conn.on('open', () => {
+          setStatus('iPhone verbunden — warte auf Magnet…', 'ok');
+        });
+        conn.on('data', (msg) => {
+          if (!msg || typeof msg !== 'object' || !msg.magnet) return;
+          gotMagnet = true;
+          setStatus('Magnet erhalten — starte Stream…', 'ok');
+          startTorrent(msg);
+        });
+        conn.on('error', (err) => {
+          setStatus('Verbindungsfehler: ' + (err && err.type || err), 'err');
+          pairBtn.disabled = false;
+        });
+        conn.on('close', () => {
+          if (!gotMagnet) setStatus('iPhone hat verbindung getrennt.', 'err');
+        });
       });
-      room.onPeerLeave(() => {
-        if (!gotMagnet) setStatus('iPhone hat den Room verlassen.', 'err');
+
+      peer.on('error', (err) => {
+        const t = err && err.type;
+        let msg;
+        if (t === 'peer-unavailable') {
+          msg = 'iPhone mit Code ' + code + ' nicht gefunden. Sender öffnen, Cast starten.';
+        } else {
+          msg = 'PeerJS-Fehler: ' + (t || err.message || err);
+        }
+        setStatus(msg, 'err');
+        pairBtn.disabled = false;
       });
 
-      getMagnet((msg) => {
-        if (!msg || typeof msg !== 'object' || !msg.magnet) return;
-        gotMagnet = true;
-        setStatus('Magnet erhalten — starte Stream…', 'ok');
-        startTorrent(msg);
-      });
-
-      // Hinweis nach 30 s, falls noch kein iPhone beigetreten ist.
-      // getPeers() zeigt, ob Signaling überhaupt jemanden sieht
-      // (relays/broker erreicht, aber WebRTC-Handshake nicht durch).
+      // Hinweis nach 30 s, falls bis dahin nichts passiert ist
       setTimeout(() => {
-        if (!peerSeen && session && session.room === room) {
-          let peerCount = '?';
-          try {
-            const peers = room.getPeers ? room.getPeers() : null;
-            if (peers) peerCount = String(Object.keys(peers).length);
-          } catch {}
-          setStatus('Kein iPhone in 30 s (Signaling sieht ' + peerCount + ' Peers). QR scannen oder Code abtippen.', 'err');
+        if (!gotMagnet && session && session.peer === peer) {
+          setStatus('Kein Magnet in 30 s. iPhone Cast starten oder Code prüfen.', 'err');
           pairBtn.disabled = false;
         }
       }, 30000);
