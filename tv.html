@@ -357,7 +357,7 @@
     <div class="pair-card" id="pairCard">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · TV · v15</span>
+        <span>Beam · TV · v16</span>
       </div>
       <h1>Mit dem <em>iPhone</em> verbinden.</h1>
       <p class="lede">QR-Code mit der iPhone-Kamera scannen — Beam öffnet sich automatisch mit diesem TV verbunden.</p>
@@ -579,11 +579,23 @@
       const tvStatusTopic = 'beam-' + code.toLowerCase() + '-tvstatus';
 
       let gotMagnet = false;
+      let sseOpen = false;
+      let postOk = false;
 
       // Status zurück ans iPhone via ntfy.sh-POST
       function postStatus(state, detail) {
         const payload = JSON.stringify({ state, detail, ts: Date.now() });
-        fetch(ntfyBase + tvStatusTopic, { method: 'POST', body: payload }).catch(() => {});
+        fetch(ntfyBase + tvStatusTopic, { method: 'POST', body: payload })
+          .then((r) => {
+            if (r.ok) {
+              postOk = true;
+            } else if (!postOk) {
+              setStatus('ntfy-POST fehlgeschlagen: HTTP ' + r.status, 'err');
+            }
+          })
+          .catch((e) => {
+            if (!postOk) setStatus('ntfy-POST-Fehler: ' + (e && e.message || e), 'err');
+          });
       }
       reportStatus = postStatus;
 
@@ -599,6 +611,14 @@
       // gepostet hat, holen wir die letzte Nachricht innerhalb 5 min.
       const magnetSrc = new EventSource(ntfyBase + magnetTopic + '/sse?since=5m');
       session = { client: null, torrent: null, magnetSrc, subTimer };
+
+      magnetSrc.onopen = () => {
+        sseOpen = true;
+        if (!gotMagnet) setStatus('Bereit als Code ' + code + ' — Magnet-Kanal offen, warte auf iPhone.', 'ok');
+      };
+      magnetSrc.onerror = () => {
+        sseOpen = false;
+      };
 
       magnetSrc.onmessage = (ev) => {
         try {
@@ -616,15 +636,14 @@
         } catch {}
       };
 
-      magnetSrc.onerror = () => {
-        if (gotMagnet) return;
-        // Browser versucht automatisch reconnect; nur Statushinweis bei längerem Ausfall
-      };
-
       // Hinweis nach 60 s
       setTimeout(() => {
         if (!gotMagnet && session && session.magnetSrc === magnetSrc) {
-          setStatus('Kein Magnet in 60 s. iPhone Cast für Code ' + code + ' starten?', 'err');
+          const parts = [];
+          if (!sseOpen) parts.push('SSE-Kanal nicht offen');
+          if (!postOk) parts.push('POST scheiterte');
+          const diag = parts.length ? ' (' + parts.join(', ') + ')' : '';
+          setStatus('Kein Magnet in 60 s' + diag + '. iPhone Cast für Code ' + code + ' starten?', 'err');
           pairBtn.disabled = false;
         }
       }, 60000);

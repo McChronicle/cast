@@ -802,7 +802,7 @@
     <header class="header">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · v15</span>
+        <span>Beam · v16</span>
       </div>
       <h1>Vom iPhone <em>auf den Fernseher</em>.</h1>
       <p class="lede">Wähle ein lokales Video oder gib eine URL ein. Mit einem Tipp landet's via AirPlay direkt auf deinem TV.</p>
@@ -1750,18 +1750,32 @@
 
       let tvSeen = false;
       let magnetPostTimer = null;
+      let sseOpen = false;
+      let postOk = false;
 
       const peerHintTimer = setTimeout(() => {
         if (tvSeen) return;
+        const parts = [];
+        if (!sseOpen) parts.push('SSE-Kanal nicht offen');
+        if (!postOk) parts.push('POST scheiterte');
+        const diag = parts.length ? ' (' + parts.join(', ') + ')' : '';
         const hint = isGuest
-          ? 'Kein TV gefunden in 30 s. TV-Seite mit Code ' + code + ' geöffnet?'
-          : 'Kein TV gefunden in 30 s. Auf dem TV ' + baseUrl + ' öffnen, Code ' + code + ' eingeben.';
+          ? 'Kein TV gefunden in 30 s' + diag + '. TV-Seite mit Code ' + code + ' geöffnet?'
+          : 'Kein TV gefunden in 30 s' + diag + '. Auf dem TV ' + baseUrl + ' öffnen, Code ' + code + ' eingeben.';
         setCastStatus(hint, 'err');
       }, 30000);
 
-      // TV-Status via SSE empfangen
-      const tvStatusSrc = new EventSource(ntfyBase + tvStatusTopic + '/sse?since=now');
-      tvStatusSrc.onerror = () => {};
+      // TV-Status via SSE empfangen. since=30s lässt das iPhone alte TV-status-
+      // Pings vergangener Sessions ignorieren, fängt aber den letzten lebenden
+      // "subscribed"-Ping innerhalb 30 s vor unserem Verbindungsaufbau ein.
+      const tvStatusSrc = new EventSource(ntfyBase + tvStatusTopic + '/sse?since=30s');
+      tvStatusSrc.onopen = () => {
+        sseOpen = true;
+        if (!tvSeen) setCastStatus('Bereit (Code ' + code + ') — TV-Kanal offen, warte auf TV…');
+      };
+      tvStatusSrc.onerror = () => {
+        sseOpen = false;
+      };
       tvStatusSrc.onmessage = (ev) => {
         try {
           const data = JSON.parse(ev.data);
@@ -1808,7 +1822,17 @@
           ts: Date.now(),
         });
         const postMagnet = () => {
-          fetch(ntfyBase + magnetTopic, { method: 'POST', body: payload }).catch(() => {});
+          fetch(ntfyBase + magnetTopic, { method: 'POST', body: payload })
+            .then((r) => {
+              if (r.ok) {
+                postOk = true;
+              } else if (!postOk) {
+                setCastStatus('ntfy-POST fehlgeschlagen: HTTP ' + r.status, 'err');
+              }
+            })
+            .catch((e) => {
+              if (!postOk) setCastStatus('ntfy-POST-Fehler: ' + (e && e.message || e), 'err');
+            });
         };
         postMagnet();
         magnetPostTimer = setInterval(postMagnet, 15000);
