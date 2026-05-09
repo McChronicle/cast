@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#000000" />
+  <title>Beam TV — Empfänger</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <style>
+    :root {
+      --bg: #000;
+      --bg-elev: #111;
+      --bg-card: #1a1a1a;
+      --line: rgba(255,255,255,0.1);
+      --line-strong: rgba(255,255,255,0.2);
+      --text: #f5f1ea;
+      --text-dim: #b3aea4;
+      --text-faint: #6b665e;
+      --accent: #ff6b35;
+      --accent-soft: rgba(255,107,53,0.15);
+      --accent-glow: rgba(255,107,53,0.45);
+      --warn: #f5b342;
+      --serif: Georgia, "Times New Roman", serif;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 24px;
+      line-height: 1.4;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    .stage {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4vw;
+      position: relative;
+    }
+
+    .pair-card {
+      background: var(--bg-card);
+      border: 2px solid var(--line);
+      border-radius: 32px;
+      padding: 6vw 8vw;
+      max-width: 1100px;
+      width: 100%;
+      text-align: center;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 32px;
+    }
+    .brand-dot {
+      width: 12px; height: 12px;
+      background: var(--accent);
+      border-radius: 50%;
+      box-shadow: 0 0 16px var(--accent-glow);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.55; transform: scale(0.85); }
+    }
+
+    h1 {
+      font-family: var(--serif);
+      font-style: italic;
+      font-weight: 400;
+      font-size: clamp(36px, 5vw, 72px);
+      line-height: 1.1;
+      letter-spacing: -0.02em;
+      margin-bottom: 22px;
+    }
+    h1 em { color: var(--accent); }
+    .lede {
+      font-size: clamp(18px, 1.7vw, 26px);
+      color: var(--text-dim);
+      max-width: 760px;
+      margin: 0 auto 44px;
+    }
+
+    .code-input-wrap {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 32px;
+    }
+    .code-input {
+      background: var(--bg-elev);
+      border: 2px solid var(--line-strong);
+      border-radius: 18px;
+      padding: 18px 28px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: clamp(28px, 3vw, 44px);
+      font-weight: 700;
+      letter-spacing: 0.25em;
+      text-align: center;
+      color: var(--accent);
+      width: clamp(280px, 50vw, 540px);
+      text-transform: uppercase;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .code-input:focus { border-color: var(--accent); }
+    .code-input::placeholder { color: var(--text-faint); letter-spacing: 0.05em; font-weight: 400; }
+
+    .pair-btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 18px;
+      padding: 20px 56px;
+      font-family: var(--sans);
+      font-size: clamp(18px, 1.8vw, 26px);
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      cursor: pointer;
+      transition: transform 0.1s, box-shadow 0.2s, opacity 0.2s;
+      box-shadow: 0 6px 30px var(--accent-glow);
+    }
+    .pair-btn:focus { outline: 3px solid #fff; outline-offset: 4px; }
+    .pair-btn:active { transform: scale(0.97); }
+    .pair-btn:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
+
+    .hint {
+      margin-top: 36px;
+      font-size: clamp(14px, 1.2vw, 18px);
+      color: var(--text-faint);
+    }
+
+    .status {
+      margin-top: 28px;
+      font-size: clamp(16px, 1.4vw, 22px);
+      color: var(--text-dim);
+      min-height: 1.2em;
+    }
+    .status.ok { color: var(--accent); }
+    .status.err { color: var(--warn); }
+
+    .player {
+      position: fixed;
+      inset: 0;
+      background: #000;
+      display: none;
+      z-index: 10;
+    }
+    .player.active { display: block; }
+    .player video {
+      width: 100%;
+      height: 100%;
+      display: block;
+      background: #000;
+      object-fit: contain;
+    }
+
+    .player-overlay {
+      position: absolute;
+      left: 0; right: 0; top: 0;
+      padding: 24px 32px;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.7), transparent);
+      color: var(--text);
+      font-size: 18px;
+      pointer-events: none;
+      opacity: 1;
+      transition: opacity 0.3s;
+      z-index: 11;
+    }
+    .player-overlay.hide { opacity: 0; }
+    .player-overlay-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .player-overlay-dot {
+      width: 10px; height: 10px;
+      background: var(--accent);
+      border-radius: 50%;
+      box-shadow: 0 0 12px var(--accent-glow);
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+    .player-overlay-name {
+      font-family: var(--serif);
+      font-style: italic;
+      font-size: 22px;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .player-overlay-stat {
+      font-family: ui-monospace, monospace;
+      font-size: 14px;
+      color: var(--text-dim);
+    }
+
+    .loading {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      color: var(--text);
+    }
+    .loading-spinner {
+      width: 64px; height: 64px;
+      border: 4px solid var(--line);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 20px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-text {
+      font-size: 22px;
+      color: var(--text-dim);
+    }
+    .loading-progress {
+      margin-top: 16px;
+      font-family: ui-monospace, monospace;
+      font-size: 16px;
+      color: var(--text-faint);
+    }
+
+    .footer-tag {
+      padding: 18px 4vw;
+      text-align: center;
+      font-size: 14px;
+      color: var(--text-faint);
+      letter-spacing: 0.1em;
+    }
+    .footer-tag em { font-family: var(--serif); font-style: italic; color: var(--text-dim); }
+  </style>
+</head>
+<body>
+  <div class="stage" id="stage">
+    <div class="pair-card" id="pairCard">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <span>Beam · TV</span>
+      </div>
+      <h1>Code vom <em>iPhone</em> eingeben.</h1>
+      <p class="lede">Auf deinem iPhone in Beam ein Video laden, „Per Code an Samsung-TV" tippen, dann den 6-stelligen Code hier eintippen.</p>
+      <div class="code-input-wrap">
+        <input type="text" class="code-input" id="codeInput" placeholder="ABCDEF" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" inputmode="text" />
+      </div>
+      <button class="pair-btn" id="pairBtn" disabled>Verbinden</button>
+      <div class="hint">Tipp: Per QR-Code auf dem iPhone öffnest du diese Seite mit vorbelegtem Code.</div>
+      <div class="status" id="status"></div>
+    </div>
+  </div>
+
+  <div class="player" id="player">
+    <div id="videoMount"></div>
+    <div class="player-overlay" id="overlay">
+      <div class="player-overlay-row">
+        <div class="player-overlay-dot"></div>
+        <div class="player-overlay-name" id="overlayName">Beam</div>
+        <div class="player-overlay-stat" id="overlayStat"></div>
+      </div>
+    </div>
+    <div class="loading" id="loading">
+      <div class="loading-spinner"></div>
+      <div class="loading-text" id="loadingText">Lade Metadaten…</div>
+      <div class="loading-progress" id="loadingProgress"></div>
+    </div>
+  </div>
+
+  <div class="footer-tag">
+    <em>Beam — empfängt vom iPhone via WebTorrent</em>
+  </div>
+
+  <script>
+    'use strict';
+
+    const codeInput = document.getElementById('codeInput');
+    const pairBtn = document.getElementById('pairBtn');
+    const status = document.getElementById('status');
+    const stage = document.getElementById('stage');
+    const player = document.getElementById('player');
+    const videoMount = document.getElementById('videoMount');
+    const overlay = document.getElementById('overlay');
+    const overlayName = document.getElementById('overlayName');
+    const overlayStat = document.getElementById('overlayStat');
+    const loading = document.getElementById('loading');
+    const loadingText = document.getElementById('loadingText');
+    const loadingProgress = document.getElementById('loadingProgress');
+
+    function setStatus(msg, kind = '') {
+      status.textContent = msg || '';
+      status.classList.remove('ok', 'err');
+      if (kind) status.classList.add(kind);
+    }
+
+    function formatBytes(b) {
+      if (b == null || isNaN(b)) return '–';
+      const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+      let i = 0; let n = Number(b);
+      while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+      return n.toFixed(n >= 100 ? 0 : n >= 10 ? 1 : 2) + ' ' + u[i];
+    }
+
+    // Code normalisieren (nur Großbuchstaben/Zahlen, max. 6)
+    codeInput.addEventListener('input', () => {
+      const cleaned = codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+      if (cleaned !== codeInput.value) codeInput.value = cleaned;
+      pairBtn.disabled = cleaned.length !== 6;
+    });
+    codeInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !pairBtn.disabled) pairBtn.click();
+    });
+
+    // Code aus URL übernehmen (?code=ABCDEF)
+    const urlCode = (new URLSearchParams(window.location.search).get('code') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+    if (urlCode.length === 6) {
+      codeInput.value = urlCode;
+      pairBtn.disabled = false;
+    } else {
+      codeInput.focus();
+    }
+
+    pairBtn.addEventListener('click', () => connect(codeInput.value));
+
+    // Auto-Connect, falls Code via URL kam
+    if (urlCode.length === 6) {
+      // Kleine Verzögerung, damit der Nutzer den Code-Vorbelegungs-Effekt sieht
+      setTimeout(() => connect(urlCode), 400);
+    }
+
+    const scriptCache = new Map();
+    function loadScript(src) {
+      if (scriptCache.has(src)) return scriptCache.get(src);
+      const p = new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = src;
+        s.onload = resolve;
+        s.onerror = () => reject(new Error('Konnte ' + src + ' nicht laden'));
+        document.head.appendChild(s);
+      });
+      scriptCache.set(src, p);
+      return p;
+    }
+
+    let session = null;
+
+    async function connect(code) {
+      pairBtn.disabled = true;
+      setStatus('Lade WebTorrent & PeerJS…');
+      try {
+        await Promise.all([
+          loadScript('https://cdn.jsdelivr.net/npm/webtorrent@2.4.1/webtorrent.min.js'),
+          loadScript('https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js'),
+        ]);
+      } catch (e) {
+        setStatus(e.message || 'Bibliotheken konnten nicht geladen werden.', 'err');
+        pairBtn.disabled = false;
+        return;
+      }
+
+      setStatus('Verbinde mit Pairing-Server…');
+
+      const peer = new window.Peer({ debug: 0 });
+      const peerHostId = 'beam-' + code.toLowerCase();
+      session = { peer, conn: null, client: null, torrent: null };
+
+      peer.on('error', (err) => {
+        const msg = (err && err.type) ? err.type : (err && err.message) || String(err);
+        if (msg === 'peer-unavailable') {
+          setStatus('Kein Sender mit diesem Code aktiv. Code prüfen.', 'err');
+        } else {
+          setStatus('Pairing-Fehler: ' + msg, 'err');
+        }
+        pairBtn.disabled = false;
+      });
+
+      peer.on('open', () => {
+        setStatus('Mit Sender verbinden…');
+        const conn = peer.connect(peerHostId, { reliable: true });
+        session.conn = conn;
+        conn.on('open', () => {
+          setStatus('Verbunden — warte auf Magnet-Link…', 'ok');
+        });
+        conn.on('data', (msg) => {
+          if (!msg || typeof msg !== 'object') return;
+          if (msg.type === 'magnet' && msg.magnet) {
+            setStatus('Magnet erhalten — starte Stream…', 'ok');
+            startTorrent(msg);
+          }
+        });
+        conn.on('close', () => {
+          // Verbindung weg ist nach Magnet-Empfang okay (Stream läuft via WebTorrent direkt)
+        });
+      });
+
+      function reportStatus(state, detail) {
+        try { session && session.conn && session.conn.send({ type: 'status', state, detail }); } catch {}
+      }
+
+      function startTorrent(meta) {
+        stage.style.display = 'none';
+        player.classList.add('active');
+        overlayName.textContent = meta.name || 'Stream';
+        loadingText.textContent = 'Lade Metadaten…';
+        loadingProgress.textContent = '';
+
+        const client = new window.WebTorrent();
+        session.client = client;
+
+        const opts = {
+          announce: [
+            'wss://tracker.openwebtorrent.com',
+            'wss://tracker.btorrent.xyz',
+            'wss://tracker.webtorrent.dev',
+          ],
+        };
+
+        client.on('error', (err) => {
+          loadingText.textContent = 'WebTorrent-Fehler';
+          loadingProgress.textContent = String(err.message || err);
+          reportStatus('error', String(err.message || err));
+        });
+
+        client.add(meta.magnet, opts, (torrent) => {
+          session.torrent = torrent;
+          reportStatus('metadata');
+          loadingText.textContent = 'Puffert…';
+          // Größte Datei wählen (üblicherweise das Video)
+          const file = torrent.files.reduce((a, b) => (b.length > a.length ? b : a), torrent.files[0]);
+          // Video-Element erzeugen und streamen
+          videoMount.innerHTML = '';
+          const v = document.createElement('video');
+          v.controls = true;
+          v.autoplay = true;
+          v.playsInline = true;
+          v.preload = 'auto';
+          videoMount.appendChild(v);
+          // renderTo nutzt render-media — entscheidet je nach Format
+          // zwischen MediaSource-Streaming und Blob-URL-Fallback.
+          file.renderTo(v, { autoplay: true, controls: true });
+
+          v.addEventListener('canplay', () => {
+            loading.style.display = 'none';
+            reportStatus('playing');
+            tryFullscreen();
+            requestWakeLock();
+          });
+          v.addEventListener('waiting', () => { reportStatus('buffering'); });
+          v.addEventListener('playing', () => { reportStatus('playing'); });
+          v.addEventListener('error', () => {
+            const code = v.error ? v.error.code : 0;
+            loadingText.textContent = 'Wiedergabefehler';
+            loadingProgress.textContent = 'Code ' + code + ' — Codec evtl. nicht unterstützt.';
+            reportStatus('error', 'video error code ' + code);
+          });
+
+          // Overlay nach kurzer Zeit ausblenden
+          let overlayTimer;
+          const showOverlay = () => {
+            overlay.classList.remove('hide');
+            clearTimeout(overlayTimer);
+            overlayTimer = setTimeout(() => overlay.classList.add('hide'), 4000);
+          };
+          showOverlay();
+          v.addEventListener('mousemove', showOverlay);
+          v.addEventListener('click', showOverlay);
+          v.addEventListener('keydown', showOverlay);
+          window.addEventListener('keydown', showOverlay);
+
+          torrent.on('download', () => {
+            const pct = Math.round(torrent.progress * 100);
+            const dn = formatBytes(torrent.downloadSpeed) + '/s';
+            overlayStat.textContent = pct + '% · ↓ ' + dn;
+            if (loading.style.display !== 'none') {
+              loadingProgress.textContent = formatBytes(torrent.downloaded) + ' / ' + formatBytes(file.length) + ' · ↓ ' + dn;
+            }
+          });
+          torrent.on('done', () => {
+            overlayStat.textContent = 'vollständig geladen';
+          });
+        });
+      }
+    }
+
+    function tryFullscreen() {
+      const el = document.documentElement;
+      const req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
+      if (req) {
+        try { req.call(el); } catch {}
+      }
+    }
+
+    let wakeLock = null;
+    async function requestWakeLock() {
+      if (!('wakeLock' in navigator)) return;
+      try {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => { wakeLock = null; });
+      } catch {}
+    }
+
+    window.addEventListener('beforeunload', () => {
+      try { session && session.client && session.client.destroy(); } catch {}
+      try { session && session.peer && session.peer.destroy(); } catch {}
+    });
+  </script>
+</body>
+</html>
