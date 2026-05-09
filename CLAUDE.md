@@ -11,7 +11,7 @@ Bei jedem PR die Version um 1 erhöhen — gleichzeitig an allen vier Stellen, s
 3. `sw.js` — `const CACHE = 'beam-shell-vN';` (zwingt SW-Cache-Invalidierung)
 4. `manifest.webmanifest` — `"version": "N"`
 
-Schema: einfacher monoton steigender Integer. Kein Semver, kein Datum. Aktuell **v25**.
+Schema: einfacher monoton steigender Integer. Kein Semver, kein Datum. Aktuell **v26**.
 
 In der PR-Beschreibung den Versions-Bump erwähnen, damit der GitHub-Pages-Deployment-Status nachvollziehbar bleibt.
 

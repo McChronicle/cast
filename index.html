@@ -802,7 +802,7 @@
     <header class="header">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · v25</span>
+        <span>Beam · v26</span>
       </div>
       <h1>Vom iPhone <em>auf den Fernseher</em>.</h1>
       <p class="lede">Wähle ein lokales Video oder gib eine URL ein. Mit einem Tipp landet's via AirPlay direkt auf deinem TV.</p>
@@ -1982,7 +1982,9 @@
                 const mime = (kind === 'video' ? 'video/mp4' : 'audio/mp4') +
                              '; codecs="' + t.codec + '"';
                 trackInfo[t.id] = { type: kind, mime };
-                mp4box.setSegmentOptions(t.id, null, { nbSamples: 100 });
+                // Kleinere Segments (nbSamples=30) → feinere Granularität
+                // für TV-seitige Eviction. Bei 30fps sind das ~1s pro Segment.
+                mp4box.setSegmentOptions(t.id, null, { nbSamples: 30 });
               }
               const initSegs = mp4box.initializeSegmentation();
               for (const seg of initSegs) {
