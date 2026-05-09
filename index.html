@@ -455,12 +455,14 @@ video.hidden { display: none; }
       statusEl.classList.toggle('ok', ok);
     }
 
-    function loadSource(src) {
-      // Alte Object-URL aufräumen
+    function releaseObjectURL() {
       if (currentObjectURL) {
         URL.revokeObjectURL(currentObjectURL);
         currentObjectURL = null;
       }
+    }
+
+    function loadSource(src) {
       video.src = src;
       video.classList.remove('hidden');
       playerWrap.classList.remove('empty');
@@ -473,6 +475,11 @@ video.hidden { display: none; }
     fileInput.addEventListener('change', (e) => {
       const file = e.target.files && e.target.files[0];
       if (!file) return;
+      // Erst die ALTE Object-URL freigeben, dann neue erzeugen.
+      // Sonst würde die gerade erstellte Blob-URL sofort widerrufen,
+      // was bei großen Dateien (mehrere GB) zum Abbruch führt, sobald
+      // Safari weitere Byte-Ranges nachladen will.
+      releaseObjectURL();
       currentObjectURL = URL.createObjectURL(file);
       loadSource(currentObjectURL);
     });
@@ -487,6 +494,7 @@ video.hidden { display: none; }
         setStatus('Bitte eine gültige URL eingeben.');
         return;
       }
+      releaseObjectURL();
       loadSource(url);
     }
     urlBtn.addEventListener('click', submitUrl);
