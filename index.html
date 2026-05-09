@@ -802,7 +802,7 @@
     <header class="header">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · v13</span>
+        <span>Beam · v14</span>
       </div>
       <h1>Vom iPhone <em>auf den Fernseher</em>.</h1>
       <p class="lede">Wähle ein lokales Video oder gib eine URL ein. Mit einem Tipp landet's via AirPlay direkt auf deinem TV.</p>
@@ -1766,40 +1766,32 @@
       setCastStatus('Verbinde zu Pairing-Server…');
 
       const client = new window.WebTorrent();
-      // iPhone registriert sich als Host mit deterministischer ID,
-      // damit der TV ohne Discovery direkt verbinden kann.
       const peerId = 'beam-' + code.toLowerCase();
-      const peer = new window.Peer(peerId, {
-        debug: 1,
-      });
+      // Wer den Code generiert hat = Host. Code-Konsument = Client.
+      // Host-Modus (iPhone hat Code generiert) → wir registrieren peerId
+      // Guest-Modus (Code via QR-Scan) → wir verbinden uns als Client zum TV
+      const meIsHost = !isGuest;
+      const peer = meIsHost
+        ? new window.Peer(peerId, { debug: 1 })
+        : new window.Peer({ debug: 1 });
       let connection = null;
       let peerSeen = false;
+      let connectAttempts = 0;
 
       const peerHintTimer = setTimeout(() => {
         if (peerSeen) return;
         const hint = isGuest
-          ? 'Kein TV verbunden. TV-Seite noch offen? QR ggf. neu scannen.'
+          ? 'Kein TV verbunden. TV-Seite (mit Code ' + code + ') noch offen?'
           : 'Kein TV verbunden. Auf dem TV ' + baseUrl + ' öffnen, Code ' + code + ' eingeben.';
         setCastStatus(hint, 'err');
-      }, 20000);
+      }, 30000);
 
       castSession = { peer, client, code, torrent: null, peerHintTimer };
 
-      peer.on('open', (id) => {
-        setCastStatus('Bereit (Code ' + code + ') — warte auf TV…');
-      });
-      peer.on('error', (err) => {
-        // unavailable-id heißt: jemand anderes nutzt diesen Code gerade
-        const msg = err && err.type === 'unavailable-id'
-          ? 'Code ' + code + ' ist gerade belegt — nochmal versuchen.'
-          : 'Pairing-Server-Fehler: ' + (err && (err.type || err.message) || err);
-        setCastStatus(msg, 'err');
-      });
-      peer.on('connection', (conn) => {
+      function attachConn(conn) {
         connection = conn;
         peerSeen = true;
         clearTimeout(peerHintTimer);
-        setCastStatus('TV verbindet sich…', 'ok');
         conn.on('open', () => {
           setCastStatus('TV verbunden — sende Magnet…', 'ok');
           trySendMagnet();
@@ -1814,6 +1806,46 @@
         });
         conn.on('close', () => setCastStatus('Verbindung zum TV getrennt.'));
         conn.on('error', (e) => setCastStatus('Verbindungsfehler: ' + (e && e.type || e), 'err'));
+      }
+
+      function tryConnect() {
+        if (!castSession || castSession.peer !== peer) return;
+        connectAttempts++;
+        setCastStatus('Verbinde zu TV (Versuch ' + connectAttempts + ')…');
+        attachConn(peer.connect(peerId, { reliable: true }));
+      }
+
+      peer.on('open', () => {
+        if (meIsHost) {
+          setCastStatus('Bereit (Code ' + code + ') — warte auf TV…');
+        } else {
+          tryConnect();
+        }
+      });
+
+      peer.on('connection', (conn) => {
+        if (!meIsHost) return;
+        setCastStatus('TV verbindet sich…', 'ok');
+        attachConn(conn);
+      });
+
+      peer.on('error', (err) => {
+        const t = err && err.type;
+        if (t === 'peer-unavailable' && !meIsHost) {
+          // TV noch nicht da — nach 2 s erneut versuchen, max 15 Versuche
+          if (connectAttempts < 15) {
+            setCastStatus('TV noch nicht da — warte (Versuch ' + connectAttempts + '/15)…');
+            setTimeout(() => {
+              if (castSession && castSession.peer === peer && !peerSeen) tryConnect();
+            }, 2000);
+            return;
+          }
+          setCastStatus('TV mit Code ' + code + ' nicht gefunden. TV-Seite öffnen.', 'err');
+        } else if (t === 'unavailable-id' && meIsHost) {
+          setCastStatus('Code ' + code + ' belegt — Modal schließen und nochmal öffnen.', 'err');
+        } else {
+          setCastStatus('Pairing-Server-Fehler: ' + (t || err.message || err), 'err');
+        }
       });
 
       function trySendMagnet() {
