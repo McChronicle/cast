@@ -772,7 +772,7 @@
     <header class="header">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · v3</span>
+        <span>Beam · v4</span>
       </div>
       <h1>Vom iPhone <em>auf den Fernseher</em>.</h1>
       <p class="lede">Wähle ein lokales Video oder gib eine URL ein. Mit einem Tipp landet's via AirPlay direkt auf deinem TV.</p>
@@ -1545,6 +1545,35 @@
       return p;
     }
 
+    let webTorrentLoadPromise = null;
+    function loadWebTorrent() {
+      if (window.WebTorrent) return Promise.resolve();
+      if (webTorrentLoadPromise) return webTorrentLoadPromise;
+      // WebTorrent v2 ist ESM-only. Erst esm.sh, bei Fehlschlag jsdelivr +esm,
+      // bei nächstem Fehlschlag webtorrent.io's UMD-Bundle als letzte Reserve.
+      const sources = [
+        () => import('https://esm.sh/webtorrent@2.4.1?bundle'),
+        () => import('https://cdn.jsdelivr.net/npm/webtorrent@2.4.1/+esm'),
+      ];
+      webTorrentLoadPromise = (async () => {
+        let lastErr;
+        for (const fn of sources) {
+          try {
+            const mod = await fn();
+            window.WebTorrent = mod.default || mod.WebTorrent || mod;
+            if (typeof window.WebTorrent === 'function') return;
+          } catch (e) { lastErr = e; }
+        }
+        // Letzter Versuch: offizielles UMD-Bundle von webtorrent.io
+        try {
+          await loadScript('https://webtorrent.io/webtorrent.min.js');
+          if (typeof window.WebTorrent === 'function') return;
+        } catch (e) { lastErr = e; }
+        throw new Error('WebTorrent konnte nicht geladen werden' + (lastErr ? ': ' + lastErr.message : ''));
+      })();
+      return webTorrentLoadPromise;
+    }
+
     function setCastStatus(text, kind = '') {
       castStatusText.textContent = text;
       castStatusEl.classList.remove('ok', 'err');
@@ -1589,8 +1618,10 @@
       castMeta.innerHTML = '';
 
       try {
+        // WebTorrent gibt's seit v2 nur als ESM — daher dynamischer Import.
+        // PeerJS und qrcode-generator als klassische UMD-Skripte.
         await Promise.all([
-          loadScript('https://cdn.jsdelivr.net/npm/webtorrent@2.4.1/webtorrent.min.js'),
+          loadWebTorrent(),
           loadScript('https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js'),
           loadScript('https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js'),
         ]);
