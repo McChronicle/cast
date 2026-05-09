@@ -259,7 +259,7 @@
     <div class="pair-card" id="pairCard">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · TV · v4</span>
+        <span>Beam · TV · v5</span>
       </div>
       <h1>Code vom <em>iPhone</em> eingeben.</h1>
       <p class="lede">Auf deinem iPhone in Beam ein Video laden, „Per Code an Samsung-TV" tippen, dann den 6-stelligen Code hier eintippen.</p>
@@ -368,22 +368,25 @@
       if (window.WebTorrent) return Promise.resolve();
       if (webTorrentLoadPromise) return webTorrentLoadPromise;
       const sources = [
-        () => import('https://esm.sh/webtorrent@2.4.1?bundle'),
-        () => import('https://cdn.jsdelivr.net/npm/webtorrent@2.4.1/+esm'),
+        async () => { await loadScript('https://cdn.jsdelivr.net/npm/webtorrent@1.9.7/webtorrent.min.js'); },
+        async () => { await loadScript('https://unpkg.com/webtorrent@1.9.7/webtorrent.min.js'); },
+        async () => {
+          const m = await import('https://esm.sh/webtorrent@2.4.1?bundle');
+          window.WebTorrent = m.default || m.WebTorrent;
+        },
+        async () => {
+          const m = await import('https://cdn.jsdelivr.net/npm/webtorrent@2.4.1/+esm');
+          window.WebTorrent = m.default || m.WebTorrent;
+        },
       ];
       webTorrentLoadPromise = (async () => {
         let lastErr;
         for (const fn of sources) {
           try {
-            const mod = await fn();
-            window.WebTorrent = mod.default || mod.WebTorrent || mod;
+            await fn();
             if (typeof window.WebTorrent === 'function') return;
           } catch (e) { lastErr = e; }
         }
-        try {
-          await loadScript('https://webtorrent.io/webtorrent.min.js');
-          if (typeof window.WebTorrent === 'function') return;
-        } catch (e) { lastErr = e; }
         throw new Error('WebTorrent konnte nicht geladen werden' + (lastErr ? ': ' + lastErr.message : ''));
       })();
       return webTorrentLoadPromise;
