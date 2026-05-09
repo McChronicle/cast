@@ -357,7 +357,7 @@
     <div class="pair-card" id="pairCard">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · TV · v25</span>
+        <span>Beam · TV · v26</span>
       </div>
       <h1>Mit dem <em>iPhone</em> verbinden.</h1>
       <p class="lede">QR-Code mit der iPhone-Kamera scannen — Beam öffnet sich automatisch mit diesem TV verbunden.</p>
@@ -704,6 +704,14 @@
             reportStatus('playing');
             tryFullscreen();
             requestWakeLock();
+            // Falls autoplay (Tizen) nicht durchgreift, manuell starten.
+            if (videoElement.paused) {
+              videoElement.play().catch(() => {});
+            }
+          });
+          videoElement.addEventListener('loadedmetadata', () => {
+            // Sobald Metadaten da: erster Play-Versuch
+            videoElement.play().catch(() => {});
           });
           videoElement.addEventListener('waiting', () => { reportStatus('buffering'); });
           videoElement.addEventListener('playing', () => { reportStatus('playing'); });
@@ -774,12 +782,14 @@
             tb.queue.shift();
           } catch (e) {
             if (e.name === 'QuotaExceededError') {
-              // Buffer voll — evict aggressiv (nur 1 s Look-Behind statt 30)
-              const evicted = evictOld(trackId, 1, true);
+              // Buffer voll — evict so aggressiv wie möglich, alles bis
+              // 0.5 s vor Wiedergabe-Position löschen.
+              const evicted = evictOld(trackId, 0.5, true);
               if (!evicted) {
-                // Nichts zu evictieren (Wiedergabe noch nicht weit genug?) →
+                // Nichts zu evictieren (Wiedergabe bei 0?) →
                 // kann nichts mehr tun ohne ungespielte Daten zu verwerfen.
-                setStatus('SourceBuffer voll, Wiedergabe nicht weit genug — Codec evtl. zu groß für TV.', 'err');
+                const ct = videoElement ? videoElement.currentTime : 0;
+                setStatus('SourceBuffer voll bei ▶ ' + ct.toFixed(1) + ' s — Wiedergabe steht, Codec evtl. zu schwer für TV.', 'err');
                 mseBroken = true;
               }
               // Buffer bleibt in queue, retry nach evict-updateend
@@ -811,9 +821,10 @@
           }
           trackBuffers[trackId] = { sb, queue: [], mime };
           sb.addEventListener('updateend', () => {
-            // Erst regulär evictieren (alles 30 s vor currentTime), dann queue drainen
-            if (videoElement && videoElement.currentTime > 35) {
-              if (evictOld(trackId, 30, false)) return; // remove triggert wieder updateend
+            // Aggressiv evictieren — nur 10 s vor currentTime behalten,
+            // damit Tizen's MSE-Quota nicht voll läuft.
+            if (videoElement && videoElement.currentTime > 12) {
+              if (evictOld(trackId, 10, false)) return;
             }
             drainQueue(trackId);
           });
@@ -894,7 +905,10 @@
                 if (videoElement && videoElement.buffered.length > 0) {
                   const ct = videoElement.currentTime || 0;
                   const end = videoElement.buffered.end(videoElement.buffered.length - 1);
-                  bufInfo = ' · ▶ ' + ct.toFixed(1) + ' s · Buffer ' + (end - ct).toFixed(1) + ' s';
+                  const ahead = end - ct;
+                  bufInfo = ' · ▶ ' + ct.toFixed(1) + ' s · Buffer ' + ahead.toFixed(1) + ' s';
+                  if (ahead > 60) bufInfo += ' ⚠ wächst (Eviction greift nicht)';
+                  else if (ct < 0.5 && ahead > 15) bufInfo += ' ⚠ Wiedergabe gestartet?';
                 }
               } catch {}
               loadingProgress.textContent = pct + '% · ' + formatBytes(bytesReceived) + ' / ' + formatBytes(totalBytesLocal) + bufInfo;
