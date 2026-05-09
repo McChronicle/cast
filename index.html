@@ -802,7 +802,7 @@
     <header class="header">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · v14</span>
+        <span>Beam · v15</span>
       </div>
       <h1>Vom iPhone <em>auf den Fernseher</em>.</h1>
       <p class="lede">Wähle ein lokales Video oder gib eine URL ein. Mit einem Tipp landet's via AirPlay direkt auf deinem TV.</p>
@@ -1658,32 +1658,10 @@
       return webTorrentLoadPromise;
     }
 
-    // Pairing über PeerJS (öffentlicher 0.peerjs.com Broker).
-    // ID-basiertes Routing: iPhone registriert sich als beam-{code},
-    // TV verbindet direkt zu dieser ID. Kein Topic-Discovery nötig,
-    // damit kein Strategy-Mismatch zwischen den Endpoints.
-    let peerJsLoadPromise = null;
-    function loadPeerJS(progress) {
-      if (window.Peer) return Promise.resolve();
-      if (peerJsLoadPromise) return peerJsLoadPromise;
-      const sources = [
-        { name: 'jsdelivr', fn: async () => { await loadScript('https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js'); } },
-        { name: 'unpkg',    fn: async () => { await loadScript('https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js'); } },
-      ];
-      peerJsLoadPromise = (async () => {
-        let lastErr;
-        for (let i = 0; i < sources.length; i++) {
-          const { name, fn } = sources[i];
-          if (progress) progress('PeerJS via ' + name + ' (' + (i + 1) + '/' + sources.length + ')…');
-          try {
-            await withTimeout(fn(), 10000, 'PeerJS ' + name);
-            if (typeof window.Peer === 'function') return;
-          } catch (e) { lastErr = e; }
-        }
-        throw new Error('PeerJS konnte nicht geladen werden' + (lastErr ? ': ' + lastErr.message : ''));
-      })();
-      return peerJsLoadPromise;
-    }
+    // Pairing läuft über ntfy.sh (HTTP/SSE) — kein WebRTC-Signaling-Broker
+    // mehr nötig. iPhone POSTet Magnet auf einem Code-spezifischen Topic,
+    // TV abonniert es via SSE. Status (TV → iPhone) läuft über ein zweites
+    // Topic. Keine eigene Library erforderlich, nur fetch + EventSource.
 
     function setCastStatus(text, kind = '') {
       castStatusText.textContent = text;
@@ -1704,7 +1682,8 @@
     function teardownCast() {
       if (!castSession) return;
       try { clearTimeout(castSession.peerHintTimer); } catch {}
-      try { castSession.peer && castSession.peer.destroy(); } catch {}
+      try { clearInterval(castSession.magnetPostTimer); } catch {}
+      try { castSession.tvStatusSrc && castSession.tvStatusSrc.close(); } catch {}
       try { castSession.client && castSession.client.destroy(); } catch {}
       castSession = null;
       castProgress.classList.remove('show');
@@ -1734,10 +1713,9 @@
       if (isGuest) castGuestCode.textContent = incomingCastCode.match(/.{1,3}/g).join(' ');
 
       try {
-        // qrcode-generator nur im Host-Modus laden (für eigenen QR im Modal)
-        const wtP = loadWebTorrent((s) => setCastStatus('Lade ' + s));
-        const peerP = loadPeerJS((s) => setCastStatus('Lade ' + s));
-        const promises = [wtP, peerP];
+        // Pairing läuft über ntfy.sh (HTTP/SSE) — keine extra Lib nötig.
+        // qrcode-generator nur im Host-Modus für eigenen QR im Modal.
+        const promises = [loadWebTorrent((s) => setCastStatus('Lade ' + s))];
         if (!isGuest) promises.push(withTimeout(loadScript('https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js'), 10000, 'qrcode-generator'));
         await Promise.all(promises);
       } catch (e) {
@@ -1763,113 +1741,45 @@
         }
       }
 
-      setCastStatus('Verbinde zu Pairing-Server…');
+      setCastStatus('Bereit (Code ' + code + ') — warte auf TV…');
 
       const client = new window.WebTorrent();
-      const peerId = 'beam-' + code.toLowerCase();
-      // Wer den Code generiert hat = Host. Code-Konsument = Client.
-      // Host-Modus (iPhone hat Code generiert) → wir registrieren peerId
-      // Guest-Modus (Code via QR-Scan) → wir verbinden uns als Client zum TV
-      const meIsHost = !isGuest;
-      const peer = meIsHost
-        ? new window.Peer(peerId, { debug: 1 })
-        : new window.Peer({ debug: 1 });
-      let connection = null;
-      let peerSeen = false;
-      let connectAttempts = 0;
+      const ntfyBase = 'https://ntfy.sh/';
+      const magnetTopic = 'beam-' + code.toLowerCase() + '-magnet';
+      const tvStatusTopic = 'beam-' + code.toLowerCase() + '-tvstatus';
+
+      let tvSeen = false;
+      let magnetPostTimer = null;
 
       const peerHintTimer = setTimeout(() => {
-        if (peerSeen) return;
+        if (tvSeen) return;
         const hint = isGuest
-          ? 'Kein TV verbunden. TV-Seite (mit Code ' + code + ') noch offen?'
-          : 'Kein TV verbunden. Auf dem TV ' + baseUrl + ' öffnen, Code ' + code + ' eingeben.';
+          ? 'Kein TV gefunden in 30 s. TV-Seite mit Code ' + code + ' geöffnet?'
+          : 'Kein TV gefunden in 30 s. Auf dem TV ' + baseUrl + ' öffnen, Code ' + code + ' eingeben.';
         setCastStatus(hint, 'err');
       }, 30000);
 
-      castSession = { peer, client, code, torrent: null, peerHintTimer };
-
-      function attachConn(conn) {
-        connection = conn;
-        peerSeen = true;
-        clearTimeout(peerHintTimer);
-        conn.on('open', () => {
-          setCastStatus('TV verbunden — sende Magnet…', 'ok');
-          trySendMagnet();
-        });
-        conn.on('data', (msg) => {
+      // TV-Status via SSE empfangen
+      const tvStatusSrc = new EventSource(ntfyBase + tvStatusTopic + '/sse?since=now');
+      tvStatusSrc.onerror = () => {};
+      tvStatusSrc.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data);
+          if (data.event !== 'message') return;
+          const msg = JSON.parse(data.message);
           if (!msg || typeof msg !== 'object') return;
+          tvSeen = true;
+          clearTimeout(peerHintTimer);
           const s = msg.state;
-          if (s === 'metadata') setCastStatus('TV hat Metadaten — beginnt zu laden…', 'ok');
+          if (s === 'subscribed') setCastStatus('TV verbunden — Magnet wird übertragen…', 'ok');
+          else if (s === 'metadata') setCastStatus('TV hat Metadaten — beginnt zu laden…', 'ok');
           else if (s === 'playing') setCastStatus('Spielt auf dem TV.', 'ok');
           else if (s === 'buffering') setCastStatus('Puffert auf dem TV…', 'ok');
           else if (s === 'error') setCastStatus('Fehler auf dem TV: ' + (msg.detail || ''), 'err');
-        });
-        conn.on('close', () => setCastStatus('Verbindung zum TV getrennt.'));
-        conn.on('error', (e) => setCastStatus('Verbindungsfehler: ' + (e && e.type || e), 'err'));
-      }
+        } catch {}
+      };
 
-      function tryConnect() {
-        if (!castSession || castSession.peer !== peer) return;
-        connectAttempts++;
-        setCastStatus('Verbinde zu TV (Versuch ' + connectAttempts + ')…');
-        attachConn(peer.connect(peerId, { reliable: true }));
-      }
-
-      peer.on('open', () => {
-        if (meIsHost) {
-          setCastStatus('Bereit (Code ' + code + ') — warte auf TV…');
-        } else {
-          tryConnect();
-        }
-      });
-
-      peer.on('connection', (conn) => {
-        if (!meIsHost) return;
-        setCastStatus('TV verbindet sich…', 'ok');
-        attachConn(conn);
-      });
-
-      peer.on('error', (err) => {
-        const t = err && err.type;
-        if (t === 'peer-unavailable' && !meIsHost) {
-          // TV noch nicht da — nach 2 s erneut versuchen, max 15 Versuche
-          if (connectAttempts < 15) {
-            setCastStatus('TV noch nicht da — warte (Versuch ' + connectAttempts + '/15)…');
-            setTimeout(() => {
-              if (castSession && castSession.peer === peer && !peerSeen) tryConnect();
-            }, 2000);
-            return;
-          }
-          setCastStatus('TV mit Code ' + code + ' nicht gefunden. TV-Seite öffnen.', 'err');
-        } else if (t === 'unavailable-id' && meIsHost) {
-          setCastStatus('Code ' + code + ' belegt — Modal schließen und nochmal öffnen.', 'err');
-        } else {
-          setCastStatus('Pairing-Server-Fehler: ' + (t || err.message || err), 'err');
-        }
-      });
-
-      function trySendMagnet() {
-        const t = castSession && castSession.torrent;
-        if (!connection || !connection.open) return;
-        if (!t) {
-          // Torrent noch nicht bereit — gleich nochmal versuchen
-          setTimeout(() => {
-            if (castSession && castSession.peer === peer) trySendMagnet();
-          }, 250);
-          return;
-        }
-        try {
-          connection.send({
-            magnet: t.magnetURI,
-            name: currentFile.name,
-            size: currentFile.size,
-            mime: currentFile.type || '',
-          });
-          setCastStatus('Magnet zugestellt — TV lädt jetzt…', 'ok');
-        } catch (e) {
-          setCastStatus('Senden fehlgeschlagen: ' + (e.message || e), 'err');
-        }
-      }
+      castSession = { client, code, torrent: null, peerHintTimer, tvStatusSrc, magnetPostTimer: null };
 
       // Datei in den WebTorrent-Swarm
       const opts = {
@@ -1887,8 +1797,23 @@
           ['InfoHash', torrent.infoHash.slice(0, 16) + '…'],
           ['Tracker', String(torrent.announce.length)],
         ]);
-        // Falls TV bereits verbunden: Magnet jetzt senden
-        if (connection && connection.open) trySendMagnet();
+
+        // Magnet via ntfy.sh publizieren — alle 15 s neu, damit auch
+        // späte TV-Joiner (oder TVs die nach Tab-Restart subscribieren) ihn sehen.
+        const payload = JSON.stringify({
+          magnet: torrent.magnetURI,
+          name: currentFile.name,
+          size: currentFile.size,
+          mime: currentFile.type || '',
+          ts: Date.now(),
+        });
+        const postMagnet = () => {
+          fetch(ntfyBase + magnetTopic, { method: 'POST', body: payload }).catch(() => {});
+        };
+        postMagnet();
+        magnetPostTimer = setInterval(postMagnet, 15000);
+        castSession.magnetPostTimer = magnetPostTimer;
+
         torrent.on('upload', () => {
           const sent = torrent.uploaded;
           const pct = Math.min(100, Math.round((sent / currentFile.size) * 100));
