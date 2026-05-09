@@ -1,7 +1,7 @@
 {
   "name": "Beam — Videos an den TV casten",
   "short_name": "Beam",
-  "version": "9",
+  "version": "10",
   "description": "Lokale Videos und Streams per AirPlay auf den Fernseher.",
   "start_url": "./",
   "scope": "./",
