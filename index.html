@@ -802,7 +802,7 @@
     <header class="header">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · v11</span>
+        <span>Beam · v12</span>
       </div>
       <h1>Vom iPhone <em>auf den Fernseher</em>.</h1>
       <p class="lede">Wähle ein lokales Video oder gib eine URL ein. Mit einem Tipp landet's via AirPlay direkt auf deinem TV.</p>
@@ -1667,20 +1667,31 @@
     function loadTrystero(progress) {
       if (window.__trystero) return Promise.resolve(window.__trystero);
       if (trysteroLoadPromise) return trysteroLoadPromise;
+      // WICHTIG: dieselbe Liste, dieselbe Reihenfolge wie tv.html.
+      // relayUrls explizit, damit iPhone und TV garantiert denselben Broker nutzen.
       const sources = [
-        { name: 'mqtt@0.21.5',  fn: () => import('https://esm.sh/trystero@0.21.5/mqtt') },
-        { name: 'mqtt@0.20.0',  fn: () => import('https://esm.sh/trystero@0.20.0/mqtt') },
-        { name: 'nostr@0.21.5', fn: () => import('https://esm.sh/trystero@0.21.5/nostr') },
+        {
+          name: 'mqtt@0.21.5',
+          fn: () => import('https://esm.sh/trystero@0.21.5/mqtt'),
+          relayUrls: ['wss://broker.emqx.io:8084/mqtt'],
+        },
+        {
+          name: 'nostr@0.21.5',
+          fn: () => import('https://esm.sh/trystero@0.21.5/nostr'),
+          relayUrls: ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.nostr.band'],
+        },
       ];
       trysteroLoadPromise = (async () => {
         let lastErr;
         for (let i = 0; i < sources.length; i++) {
-          const { name, fn } = sources[i];
-          if (progress) progress('trystero via ' + name + ' (' + (i + 1) + '/' + sources.length + ')…');
+          const src = sources[i];
+          if (progress) progress('trystero via ' + src.name + ' (' + (i + 1) + '/' + sources.length + ')…');
           try {
-            const mod = await withTimeout(fn(), 10000, 'trystero ' + name);
+            const mod = await withTimeout(src.fn(), 10000, 'trystero ' + src.name);
             if (typeof mod.joinRoom === 'function') {
               window.__trystero = mod;
+              window.__trysteroName = src.name;
+              window.__trysteroRelays = src.relayUrls;
               return mod;
             }
           } catch (e) { lastErr = e; }
@@ -1773,7 +1784,10 @@
       setCastStatus('Trete Pairing-Room bei…');
 
       const client = new window.WebTorrent();
-      const room = trystero.joinRoom({ appId: 'beam-cast' }, code.toLowerCase());
+      const room = trystero.joinRoom({
+        appId: 'beam-cast',
+        relayUrls: window.__trysteroRelays,
+      }, code.toLowerCase());
       const [sendMagnet] = room.makeAction('magnet');
       const [, getStatus] = room.makeAction('status');
 
@@ -1839,7 +1853,7 @@
           'wss://tracker.webtorrent.dev',
         ],
       };
-      setCastStatus('Bereit — warte auf Verbindung vom TV…');
+      setCastStatus('Bereit (Code ' + code + ' via ' + (window.__trysteroName || '?') + ') — warte auf TV…');
       client.seed(currentFile, opts, (torrent) => {
         castSession.torrent = torrent;
         setCastMeta([
