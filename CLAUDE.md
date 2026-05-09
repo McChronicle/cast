@@ -11,7 +11,7 @@ Bei jedem PR die Version um 1 erhöhen — gleichzeitig an allen vier Stellen, s
 3. `sw.js` — `const CACHE = 'beam-shell-vN';` (zwingt SW-Cache-Invalidierung)
 4. `manifest.webmanifest` — `"version": "N"`
 
-Schema: einfacher monoton steigender Integer. Kein Semver, kein Datum. Aktuell **v18**.
+Schema: einfacher monoton steigender Integer. Kein Semver, kein Datum. Aktuell **v19**.
 
 In der PR-Beschreibung den Versions-Bump erwähnen, damit der GitHub-Pages-Deployment-Status nachvollziehbar bleibt.
 
@@ -25,13 +25,16 @@ In der PR-Beschreibung den Versions-Bump erwähnen, damit der GitHub-Pages-Deplo
 
 Externe Libs werden via CDN nachgeladen (lazy beim Klick), nicht eingecheckt:
 - WebTorrent (v1.9.7 UMD primär, v2.x ESM Fallback): jsdelivr/unpkg + esm.sh
+- mqtt.js (v5 UMD) für Pairing-Signaling: jsdelivr/unpkg
 - qrcode-generator: `cdn.jsdelivr.net/npm/qrcode-generator@…/qrcode.js`
 - HLS.js: `cdn.jsdelivr.net/npm/hls.js@…/dist/hls.min.js`
 
-Pairing-Signaling: HTTPS-POST + Server-Sent Events via `ntfy.sh` —
-keine Library, nur native fetch + EventSource. Topics:
-- `beam-{code}-magnet` (iPhone POSTet, TV abonniert)
-- `beam-{code}-tvstatus` (TV POSTet, iPhone abonniert)
+Pairing-Signaling: MQTT-over-WSS auf `wss://broker.emqx.io:8084/mqtt`.
+iPhone publiziert Magnet einmal mit `retain=true` — der Broker hält die
+Nachricht, sodass auch ein TV der erst später subscribed sie sofort
+bekommt. Topics:
+- `beam/{code}/magnet` (iPhone publish, TV subscribe)
+- `beam/{code}/tvstatus` (TV publish, iPhone subscribe)
 
 ## Branch- und Merge-Workflow
 
