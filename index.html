@@ -1584,6 +1584,7 @@
       setCastStatus('Lade WebTorrent & PeerJS…');
       castCodeEl.textContent = '…';
       castCodeEl.classList.add('placeholder');
+      castUrlEl.textContent = getReceiverBaseUrl();
       castQr.innerHTML = '';
       castMeta.innerHTML = '';
 
@@ -1591,7 +1592,7 @@
         await Promise.all([
           loadScript('https://cdn.jsdelivr.net/npm/webtorrent@2.4.1/webtorrent.min.js'),
           loadScript('https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js'),
-          loadScript('https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js'),
+          loadScript('https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js'),
         ]);
       } catch (e) {
         setCastStatus(e.message || 'Bibliotheken konnten nicht geladen werden.', 'err');
@@ -1608,9 +1609,12 @@
       castUrlEl.textContent = baseUrl;
 
       try {
-        const svg = await window.QRCode.toString(tvUrl, { type: 'svg', margin: 1, width: 200 });
-        castQr.innerHTML = svg;
-      } catch {
+        // qrcode-generator: type=0 (auto), 'M' = mittlere Fehlerkorrektur
+        const qr = window.qrcode(0, 'M');
+        qr.addData(tvUrl);
+        qr.make();
+        castQr.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+      } catch (e) {
         castQr.innerHTML = '<span style="color:#888;font-size:12px">QR konnte nicht erzeugt werden</span>';
       }
 
