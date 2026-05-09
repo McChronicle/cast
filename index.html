@@ -802,7 +802,7 @@
     <header class="header">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · v20</span>
+        <span>Beam · v21</span>
       </div>
       <h1>Vom iPhone <em>auf den Fernseher</em>.</h1>
       <p class="lede">Wähle ein lokales Video oder gib eine URL ein. Mit einem Tipp landet's via AirPlay direkt auf deinem TV.</p>
@@ -1851,9 +1851,10 @@
       castSession = { client, code, torrent: null, peerHintTimer, mqttClient, magnetTopic };
 
       // Während WebTorrent die Datei hashed (kann bei mehreren GB
-      // einige Minuten dauern), Status mit Elapsed-Time und ggf. Pieces-
-      // Fortschritt aktualisieren — sonst wirkt es wie ein Hänger.
+      // einige Minuten dauern), Status mit Elapsed-Time und Datei-Größe
+      // aktualisieren — sonst wirkt es wie ein Hänger.
       const hashStart = Date.now();
+      const sizeStr = formatBytes(currentFile.size);
       const hashTimer = setInterval(() => {
         if (magnetReady || !castSession) { clearInterval(hashTimer); return; }
         if (stickyState === 'tv-playing' || stickyState === 'tv-error') {
@@ -1868,11 +1869,14 @@
             const hashed = t.pieces.filter((p) => p != null).length;
             const total = t.pieces.length;
             const pct = Math.round((hashed / total) * 100);
-            if (total > 0) pieceInfo = ' — ' + pct + '% (' + hashed + '/' + total + ')';
+            if (total > 0) pieceInfo = ' — ' + pct + '%';
           }
         } catch {}
         const prefix = tvSeen ? 'TV verbunden — ' : '';
-        setCastStatus(prefix + 'Datei wird vorbereitet (' + elapsed + ' s' + pieceInfo + ')…', tvSeen ? 'ok' : '');
+        let suffix = '';
+        if (elapsed > 90) suffix = ' (lange! Datei evtl. zu groß für iPhone-Browser)';
+        else if (elapsed > 30) suffix = ' (großes File braucht länger)';
+        setCastStatus(prefix + 'Hashing ' + sizeStr + ' — ' + elapsed + ' s' + pieceInfo + suffix + '…', tvSeen ? 'ok' : '');
       }, 1000);
 
       // Datei in den WebTorrent-Swarm
