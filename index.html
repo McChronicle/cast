@@ -772,7 +772,7 @@
     <header class="header">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · v4</span>
+        <span>Beam · v5</span>
       </div>
       <h1>Vom iPhone <em>auf den Fernseher</em>.</h1>
       <p class="lede">Wähle ein lokales Video oder gib eine URL ein. Mit einem Tipp landet's via AirPlay direkt auf deinem TV.</p>
@@ -1549,26 +1549,28 @@
     function loadWebTorrent() {
       if (window.WebTorrent) return Promise.resolve();
       if (webTorrentLoadPromise) return webTorrentLoadPromise;
-      // WebTorrent v2 ist ESM-only. Erst esm.sh, bei Fehlschlag jsdelivr +esm,
-      // bei nächstem Fehlschlag webtorrent.io's UMD-Bundle als letzte Reserve.
+      // Reihenfolge: erst v1.x UMD (klassisches <script>, am zuverlässigsten),
+      // dann v2 ESM via esm.sh / jsdelivr +esm als Fallback.
       const sources = [
-        () => import('https://esm.sh/webtorrent@2.4.1?bundle'),
-        () => import('https://cdn.jsdelivr.net/npm/webtorrent@2.4.1/+esm'),
+        async () => { await loadScript('https://cdn.jsdelivr.net/npm/webtorrent@1.9.7/webtorrent.min.js'); },
+        async () => { await loadScript('https://unpkg.com/webtorrent@1.9.7/webtorrent.min.js'); },
+        async () => {
+          const m = await import('https://esm.sh/webtorrent@2.4.1?bundle');
+          window.WebTorrent = m.default || m.WebTorrent;
+        },
+        async () => {
+          const m = await import('https://cdn.jsdelivr.net/npm/webtorrent@2.4.1/+esm');
+          window.WebTorrent = m.default || m.WebTorrent;
+        },
       ];
       webTorrentLoadPromise = (async () => {
         let lastErr;
         for (const fn of sources) {
           try {
-            const mod = await fn();
-            window.WebTorrent = mod.default || mod.WebTorrent || mod;
+            await fn();
             if (typeof window.WebTorrent === 'function') return;
           } catch (e) { lastErr = e; }
         }
-        // Letzter Versuch: offizielles UMD-Bundle von webtorrent.io
-        try {
-          await loadScript('https://webtorrent.io/webtorrent.min.js');
-          if (typeof window.WebTorrent === 'function') return;
-        } catch (e) { lastErr = e; }
         throw new Error('WebTorrent konnte nicht geladen werden' + (lastErr ? ': ' + lastErr.message : ''));
       })();
       return webTorrentLoadPromise;
