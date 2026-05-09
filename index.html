@@ -802,7 +802,7 @@
     <header class="header">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · v7</span>
+        <span>Beam · v8</span>
       </div>
       <h1>Vom iPhone <em>auf den Fernseher</em>.</h1>
       <p class="lede">Wähle ein lokales Video oder gib eine URL ein. Mit einem Tipp landet's via AirPlay direkt auf deinem TV.</p>
@@ -1690,6 +1690,7 @@
     let castSession = null;
     function teardownCast() {
       if (!castSession) return;
+      try { clearTimeout(castSession.peerHintTimer); } catch {}
       try { castSession.room && castSession.room.leave && castSession.room.leave(); } catch {}
       try { castSession.client && castSession.client.destroy(); } catch {}
       castSession = null;
@@ -1756,7 +1757,16 @@
       const [sendMagnet] = room.makeAction('magnet');
       const [, getStatus] = room.makeAction('status');
 
-      castSession = { room, client, code, torrent: null };
+      let peerSeen = false;
+      const peerHintTimer = setTimeout(() => {
+        if (peerSeen) return;
+        const hint = isGuest
+          ? 'Kein TV im Room. TV-Seite noch offen? QR ggf. neu scannen.'
+          : 'Kein TV im Room. Auf dem TV ' + baseUrl + ' öffnen, Code ' + code + ' eingeben.';
+        setCastStatus(hint, 'err');
+      }, 15000);
+
+      castSession = { room, client, code, torrent: null, peerHintTimer };
 
       // Status vom TV einsammeln
       getStatus((msg) => {
@@ -1770,6 +1780,8 @@
 
       // TV tritt dem Pairing-Room bei → Magnet senden
       room.onPeerJoin((peerId) => {
+        peerSeen = true;
+        clearTimeout(peerHintTimer);
         setCastStatus('TV verbindet sich — sende Magnet…', 'ok');
         trySendMagnet(peerId);
       });

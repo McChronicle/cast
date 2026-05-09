@@ -1,8 +1,9 @@
 // Beam — minimaler Service Worker für die App-Shell.
-// Cached nur die statischen Assets; Videos und externe CDN-Skripte
-// werden NICHT abgefangen (würden ggf. großen Speicher fressen).
+// HTML-Seiten: network-first (immer frische Version, fallback auf Cache).
+// Andere Shell-Assets: cache-first.
+// Videos und CDN-Skripte werden NICHT abgefangen.
 
-const CACHE = 'beam-shell-v7';
+const CACHE = 'beam-shell-v8';
 const SHELL = [
   './',
   './index.html',
@@ -25,18 +26,41 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+function isShellRequest(url) {
+  const path = url.pathname.replace(/\/$/, '/');
+  return SHELL.some((s) => {
+    const sPath = new URL(s, self.location.href).pathname.replace(/\/$/, '/');
+    return path === sPath;
+  });
+}
+
+function isHtmlRequest(req, url) {
+  if (req.destination === 'document') return true;
+  if (url.pathname === '/' || url.pathname.endsWith('/')) return true;
+  if (/\.html$/.test(url.pathname)) return true;
+  return false;
+}
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
-  // Nur die Shell-Dateien bedienen — Range-Requests an Videos NICHT.
-  const path = url.pathname.replace(/\/$/, '/');
-  const isShell = SHELL.some((s) => {
-    const sPath = new URL(s, self.location.href).pathname.replace(/\/$/, '/');
-    return path === sPath;
-  });
-  if (!isShell) return;
+  if (!isShellRequest(url)) return;
+
+  if (isHtmlRequest(req, url)) {
+    // network-first: damit neue Versionen sofort sichtbar sind
+    event.respondWith(
+      fetch(req).then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+        return res;
+      }).catch(() => caches.match(req))
+    );
+    return;
+  }
+
+  // andere Shell-Files (manifest, icon): cache-first
   event.respondWith(
     caches.match(req).then((cached) => cached || fetch(req).then((res) => {
       const copy = res.clone();

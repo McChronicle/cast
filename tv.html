@@ -333,7 +333,7 @@
     <div class="pair-card" id="pairCard">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · TV · v7</span>
+        <span>Beam · TV · v8</span>
       </div>
       <h1>Mit dem <em>iPhone</em> verbinden.</h1>
       <p class="lede">QR-Code mit der iPhone-Kamera scannen — Beam öffnet sich automatisch mit diesem TV verbunden.</p>
@@ -577,12 +577,18 @@
         try { sendStatus({ state, detail }); } catch {}
       };
 
+      // Trystero meldet keinen "ready"-Event — wir gehen davon aus,
+      // dass der Room sofort offen ist und der Tracker-Announce im Hintergrund läuft.
+      setStatus('Im Pairing-Room als Code ' + code + ' — bereit für iPhone.', 'ok');
+
+      let peerSeen = false;
       let gotMagnet = false;
       room.onPeerJoin(() => {
-        if (!gotMagnet) setStatus('Sender verbunden — warte auf Magnet…', 'ok');
+        peerSeen = true;
+        if (!gotMagnet) setStatus('iPhone verbunden — warte auf Magnet…', 'ok');
       });
       room.onPeerLeave(() => {
-        if (!gotMagnet) setStatus('Sender hat den Room verlassen.', 'err');
+        if (!gotMagnet) setStatus('iPhone hat den Room verlassen.', 'err');
       });
 
       getMagnet((msg) => {
@@ -592,10 +598,10 @@
         startTorrent(msg);
       });
 
-      // Falls nach 30 s noch kein Sender aufgetaucht ist: Hinweis
+      // Hinweis nach 30 s, falls noch kein iPhone beigetreten ist
       setTimeout(() => {
-        if (!gotMagnet && session && session.room === room) {
-          setStatus('Kein Sender gefunden. Code prüfen oder erneut tippen.', 'err');
+        if (!peerSeen && session && session.room === room) {
+          setStatus('Kein iPhone in 30 s. QR scannen oder Code abtippen.', 'err');
           pairBtn.disabled = false;
         }
       }, 30000);
