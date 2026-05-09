@@ -802,7 +802,7 @@
     <header class="header">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · v17</span>
+        <span>Beam · v18</span>
       </div>
       <h1>Vom iPhone <em>auf den Fernseher</em>.</h1>
       <p class="lede">Wähle ein lokales Video oder gib eine URL ein. Mit einem Tipp landet's via AirPlay direkt auf deinem TV.</p>
@@ -1849,6 +1849,8 @@
                 postOk = true;
                 magnetPostCount++;
                 refreshStatus();
+              } else if (r.status === 429) {
+                setCastStatus('ntfy-Rate-Limit — TV holt Magnet aus Cache (' + magnetPostCount + ' bestätigte Posts)…');
               } else if (!postOk) {
                 setCastStatus('ntfy-POST fehlgeschlagen: HTTP ' + r.status, 'err');
               }
@@ -1857,8 +1859,11 @@
               if (!postOk) setCastStatus('ntfy-POST-Fehler: ' + (e && e.message || e), 'err');
             });
         };
+        // Erstes Posten sofort, danach alle 60 s erneut. ntfy.sh cached
+        // Topics stundenlang — der Repost ist nur ein Sicherheitsnetz für
+        // sehr späte TV-Joins. Höhere Frequenz reisst das Rate-Limit.
         postMagnet();
-        magnetPostTimer = setInterval(postMagnet, 15000);
+        magnetPostTimer = setInterval(postMagnet, 60000);
         castSession.magnetPostTimer = magnetPostTimer;
 
         torrent.on('upload', () => {

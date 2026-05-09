@@ -357,7 +357,7 @@
     <div class="pair-card" id="pairCard">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · TV · v17</span>
+        <span>Beam · TV · v18</span>
       </div>
       <h1>Mit dem <em>iPhone</em> verbinden.</h1>
       <p class="lede">QR-Code mit der iPhone-Kamera scannen — Beam öffnet sich automatisch mit diesem TV verbunden.</p>
@@ -554,7 +554,6 @@
       if (!session) return;
       try { session.client && session.client.destroy(); } catch {}
       try { session.magnetSrc && session.magnetSrc.close(); } catch {}
-      try { clearInterval(session.subTimer); } catch {}
       session = null;
     }
 
@@ -584,13 +583,17 @@
       let sseEventCount = 0;
       let magnetEventCount = 0;
 
-      // Status zurück ans iPhone via ntfy.sh-POST
+      // Status zurück ans iPhone via ntfy.sh-POST.
+      // Sparsam posten — ntfy.sh-Rate-Limit (anonym ~30/h pro IP) ist
+      // sonst schnell weg. Status-Pings nur bei echten Phasen-Änderungen.
       function postStatus(state, detail) {
         const payload = JSON.stringify({ state, detail, ts: Date.now() });
         fetch(ntfyBase + tvStatusTopic, { method: 'POST', body: payload })
           .then((r) => {
             if (r.ok) {
               postOk = true;
+            } else if (r.status === 429) {
+              setStatus('ntfy-Rate-Limit erreicht — kurz warten und neu versuchen.', 'err');
             } else if (!postOk) {
               setStatus('ntfy-POST fehlgeschlagen: HTTP ' + r.status, 'err');
             }
@@ -601,18 +604,14 @@
       }
       reportStatus = postStatus;
 
-      // "subscribed" mehrfach posten, damit iPhone sicher mitbekommt,
-      // dass wir da sind — auch wenn iPhone-Subscription später startet.
+      // Einmalige "subscribed"-Nachricht: signalisiert dem iPhone, dass
+      // TV bereit ist. Kein periodischer Re-post — würde Rate-Limit reissen.
       postStatus('subscribed');
-      const subTimer = setInterval(() => {
-        if (gotMagnet) { clearInterval(subTimer); return; }
-        postStatus('subscribed');
-      }, 5000);
 
-      // Magnet-Topic abonnieren. since=5m: falls iPhone schon vor uns
-      // gepostet hat, holen wir die letzte Nachricht innerhalb 5 min.
-      const magnetSrc = new EventSource(ntfyBase + magnetTopic + '/sse?since=5m');
-      session = { client: null, torrent: null, magnetSrc, subTimer };
+      // Magnet-Topic abonnieren. since=2h: ntfy.sh cached Messages stundenlang;
+      // damit fängt TV einen Magnet, der schon vor uns gepostet wurde.
+      const magnetSrc = new EventSource(ntfyBase + magnetTopic + '/sse?since=2h');
+      session = { client: null, torrent: null, magnetSrc };
 
       magnetSrc.onopen = () => {
         sseOpen = true;
@@ -636,7 +635,6 @@
             return;
           }
           gotMagnet = true;
-          clearInterval(subTimer);
           try { magnetSrc.close(); } catch {}
           setStatus('Magnet erhalten — starte Stream…', 'ok');
           startTorrent(meta);
