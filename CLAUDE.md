@@ -11,7 +11,7 @@ Bei jedem PR die Version um 1 erhöhen — gleichzeitig an allen vier Stellen, s
 3. `sw.js` — `const CACHE = 'beam-shell-vN';` (zwingt SW-Cache-Invalidierung)
 4. `manifest.webmanifest` — `"version": "N"`
 
-Schema: einfacher monoton steigender Integer. Kein Semver, kein Datum. Aktuell **v21**.
+Schema: einfacher monoton steigender Integer. Kein Semver, kein Datum. Aktuell **v22**.
 
 In der PR-Beschreibung den Versions-Bump erwähnen, damit der GitHub-Pages-Deployment-Status nachvollziehbar bleibt.
 
@@ -24,17 +24,24 @@ In der PR-Beschreibung den Versions-Bump erwähnen, damit der GitHub-Pages-Deplo
 - `icon.svg` — App-Icon
 
 Externe Libs werden via CDN nachgeladen (lazy beim Klick), nicht eingecheckt:
-- WebTorrent (v1.9.7 UMD primär, v2.x ESM Fallback): jsdelivr/unpkg + esm.sh
-- mqtt.js (v5 UMD) für Pairing-Signaling: jsdelivr/unpkg
+- mqtt.js (v5 UMD) für SDP/ICE-Signaling: jsdelivr/unpkg
+- mp4box.js (v0.5.4 UMD) zum on-the-fly-Fragmentieren von iPhone-MP4 zu MSE: jsdelivr/unpkg
 - qrcode-generator: `cdn.jsdelivr.net/npm/qrcode-generator@…/qrcode.js`
 - HLS.js: `cdn.jsdelivr.net/npm/hls.js@…/dist/hls.min.js`
 
-Pairing-Signaling: MQTT-over-WSS auf `wss://broker.emqx.io:8084/mqtt`.
-iPhone publiziert Magnet einmal mit `retain=true` — der Broker hält die
-Nachricht, sodass auch ein TV der erst später subscribed sie sofort
-bekommt. Topics:
-- `beam/{code}/magnet` (iPhone publish, TV subscribe)
-- `beam/{code}/tvstatus` (TV publish, iPhone subscribe)
+Architektur (ab v22):
+- WebTorrent ist raus — kein Hashing, keine Tracker, kein Pieces-Verify mehr.
+- MQTT-over-WSS auf `wss://broker.emqx.io:8084/mqtt` für SDP/ICE-Exchange.
+- WebRTC-DataChannel iPhone↔TV für den eigentlichen Stream (LAN-Speed).
+- iPhone fragmentiert MP4-Files mit mp4box.js on-the-fly zu Init+Media-Segments.
+- TV fügt Segmente direkt via MediaSource Extensions in das `<video>`-Element —
+  kein komplettes File-Pufferung, also auch große Files kein RAM-Problem.
+
+MQTT-Topics:
+- `beam/{code}/offer` (iPhone publish retained, TV subscribe)
+- `beam/{code}/answer` (TV publish retained, iPhone subscribe)
+- `beam/{code}/ice/iphone` und `beam/{code}/ice/tv` (ICE-Kandidaten)
+- `beam/{code}/tvstatus` (TV publish retained, iPhone subscribe — Wiedergabe-Status)
 
 ## Branch- und Merge-Workflow
 

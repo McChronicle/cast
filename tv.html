@@ -357,7 +357,7 @@
     <div class="pair-card" id="pairCard">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · TV · v21</span>
+        <span>Beam · TV · v22</span>
       </div>
       <h1>Mit dem <em>iPhone</em> verbinden.</h1>
       <p class="lede">QR-Code mit der iPhone-Kamera scannen — Beam öffnet sich automatisch mit diesem TV verbunden.</p>
@@ -516,32 +516,8 @@
       });
     }
 
-    let webTorrentLoadPromise = null;
-    function loadWebTorrent(progress) {
-      if (window.WebTorrent) return Promise.resolve();
-      if (webTorrentLoadPromise) return webTorrentLoadPromise;
-      const sources = [
-        { name: 'jsdelivr', fn: async () => { await loadScript('https://cdn.jsdelivr.net/npm/webtorrent@1.9.7/webtorrent.min.js'); } },
-        { name: 'unpkg',    fn: async () => { await loadScript('https://unpkg.com/webtorrent@1.9.7/webtorrent.min.js'); } },
-        { name: 'esm.sh',   fn: async () => {
-          const m = await import('https://esm.sh/webtorrent@2.4.1?bundle');
-          window.WebTorrent = m.default || m.WebTorrent;
-        } },
-      ];
-      webTorrentLoadPromise = (async () => {
-        let lastErr;
-        for (let i = 0; i < sources.length; i++) {
-          const { name, fn } = sources[i];
-          if (progress) progress('WebTorrent via ' + name + ' (' + (i + 1) + '/' + sources.length + ')…');
-          try {
-            await withTimeout(fn(), 10000, 'WebTorrent ' + name);
-            if (typeof window.WebTorrent === 'function') return;
-          } catch (e) { lastErr = e; }
-        }
-        throw new Error('WebTorrent konnte nicht geladen werden' + (lastErr ? ': ' + lastErr.message : ''));
-      })();
-      return webTorrentLoadPromise;
-    }
+    // WebTorrent ist in v22 nicht mehr nötig — Daten kommen direkt
+    // über WebRTC-DataChannel vom iPhone, MSE übernimmt die Wiedergabe.
 
     // Pairing über MQTT-over-WebSocket auf EMQX' öffentlichem Broker.
     // iPhone publiziert Magnet mit retain=true → Broker hält die Nachricht,
@@ -575,7 +551,8 @@
 
     function disconnectSession() {
       if (!session) return;
-      try { session.client && session.client.destroy(); } catch {}
+      try { session.dc && session.dc.close(); } catch {}
+      try { session.pc && session.pc.close(); } catch {}
       try { session.mqttClient && session.mqttClient.end(true); } catch {}
       session = null;
     }
@@ -585,14 +562,11 @@
       // erst sauber abbauen, dann neu verbinden.
       disconnectSession();
       pairBtn.disabled = true;
-      setStatus('Lade WebTorrent & MQTT…');
+      setStatus('Lade MQTT…');
       try {
-        await Promise.all([
-          loadWebTorrent((s) => setStatus('Lade ' + s)),
-          loadMqtt((s) => setStatus('Lade ' + s)),
-        ]);
+        await loadMqtt((s) => setStatus('Lade ' + s));
       } catch (e) {
-        setStatus(e.message || 'Bibliotheken konnten nicht geladen werden.', 'err');
+        setStatus(e.message || 'MQTT konnte nicht geladen werden.', 'err');
         pairBtn.disabled = false;
         return;
       }
@@ -600,137 +574,171 @@
       setStatus('Bereit als Code ' + code + ' — verbinde zu Pairing-Broker…', 'ok');
 
       const mqttUrl = 'wss://broker.emqx.io:8084/mqtt';
-      const magnetTopic = 'beam/' + code.toLowerCase() + '/magnet';
-      const tvStatusTopic = 'beam/' + code.toLowerCase() + '/tvstatus';
+      const baseTopic = 'beam/' + code.toLowerCase();
+      const offerTopic = baseTopic + '/offer';
+      const answerTopic = baseTopic + '/answer';
+      const iceFromIphoneTopic = baseTopic + '/ice/iphone';
+      const iceFromTvTopic = baseTopic + '/ice/tv';
+      const tvStatusTopic = baseTopic + '/tvstatus';
       const clientId = 'beam-tv-' + Math.random().toString(36).slice(2, 10);
 
-      let gotMagnet = false;
       let mqttConnected = false;
-      let messageCount = 0;
+      let receivedMetadata = false;
+      let bytesReceived = 0;
+      let totalBytes = 0;
 
       const mqttClient = window.mqtt.connect(mqttUrl, {
-        clientId,
-        clean: true,
-        connectTimeout: 10000,
-        reconnectPeriod: 3000,
+        clientId, clean: true, connectTimeout: 10000, reconnectPeriod: 3000,
       });
-      session = { client: null, torrent: null, mqttClient };
 
-      // Status zurück ans iPhone — sparsam, nur bei echten Phasen-Änderungen.
+      // RTCPeerConnection — TV als Answerer (empfängt Offer vom iPhone)
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+      });
+
+      session = {
+        pc, dc: null, mqttClient, code,
+        clearRetained: [answerTopic, tvStatusTopic],
+      };
+
       function publishStatus(state, detail) {
         if (!mqttConnected) return;
         const payload = JSON.stringify({ state, detail, ts: Date.now() });
-        // retain=true, damit ein iPhone das nach uns subscribed direkt erfährt
         mqttClient.publish(tvStatusTopic, payload, { qos: 1, retain: true });
       }
       reportStatus = publishStatus;
 
       mqttClient.on('connect', () => {
         mqttConnected = true;
-        setStatus('Bereit als Code ' + code + ' — MQTT-Kanal offen, warte auf iPhone.', 'ok');
-        // Subscribe auf Magnet-Topic. Falls iPhone retain=true gesetzt hat
-        // (was es tut), bekommen wir die letzte Nachricht sofort.
-        mqttClient.subscribe(magnetTopic, { qos: 1 });
-        // Einmal "subscribed" mitteilen, retained, damit iPhone weiß dass TV da ist
-        publishStatus('subscribed');
+        setStatus('Bereit als Code ' + code + ' — warte auf iPhone-Offer…', 'ok');
+        mqttClient.subscribe([offerTopic, iceFromIphoneTopic], { qos: 1 });
       });
-
       mqttClient.on('error', (err) => {
-        if (!gotMagnet) setStatus('MQTT-Fehler: ' + (err && err.message || err), 'err');
+        if (!receivedMetadata) setStatus('MQTT-Fehler: ' + (err && err.message || err), 'err');
       });
+      mqttClient.on('close', () => { mqttConnected = false; });
 
-      mqttClient.on('close', () => {
-        mqttConnected = false;
-      });
-
-      mqttClient.on('message', (topic, payload) => {
-        if (topic !== magnetTopic) return;
-        messageCount++;
+      mqttClient.on('message', async (topic, payload) => {
         const text = payload.toString();
-        if (!text) return; // leere Payload = retained-clear
+        if (!text) return;
         try {
-          const meta = JSON.parse(text);
-          if (!meta || !meta.magnet || gotMagnet) return;
-          // Replay-Schutz: zu alte Magnete (>10 min) ignorieren
-          if (meta.ts && Date.now() - meta.ts > 10 * 60 * 1000) {
-            setStatus('Veralteten Magnet ignoriert (älter als 10 min) — sende erneut vom iPhone.', 'err');
-            return;
+          if (topic === offerTopic) {
+            if (pc.signalingState !== 'stable') return; // schon mal Offer verarbeitet
+            const offer = JSON.parse(text);
+            await pc.setRemoteDescription(offer);
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            mqttClient.publish(answerTopic, JSON.stringify(answer), { qos: 1, retain: true });
+            setStatus('Offer empfangen — sende Answer, baue WebRTC auf…', 'ok');
+          } else if (topic === iceFromIphoneTopic) {
+            const candidate = JSON.parse(text);
+            await pc.addIceCandidate(candidate);
           }
-          gotMagnet = true;
-          setStatus('Magnet erhalten — starte Stream…', 'ok');
-          startTorrent(meta);
-        } catch {}
+        } catch (e) {}
       });
 
-      // Hinweis nach 60 s
-      setTimeout(() => {
-        if (!gotMagnet && session && session.mqttClient === mqttClient) {
-          const parts = [];
-          parts.push('MQTT ' + (mqttConnected ? 'verbunden' : 'getrennt'));
-          parts.push(messageCount + ' Messages');
-          setStatus('Kein Magnet in 60 s [' + parts.join(', ') + ']. iPhone Cast für Code ' + code + ' gestartet?', 'err');
+      pc.onicecandidate = (e) => {
+        if (e.candidate && mqttConnected) {
+          mqttClient.publish(iceFromTvTopic, JSON.stringify(e.candidate), { qos: 1 });
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'connected') {
+          setStatus('WebRTC verbunden — warte auf Stream…', 'ok');
+        } else if (pc.connectionState === 'failed') {
+          setStatus('WebRTC-Verbindung fehlgeschlagen.', 'err');
           pairBtn.disabled = false;
         }
-      }, 60000);
+      };
 
-      function startTorrent(meta) {
-        stage.style.display = 'none';
-        player.classList.add('active');
-        overlayName.textContent = meta.name || 'Stream';
-        loadingText.textContent = 'Lade Metadaten…';
-        loadingProgress.textContent = '';
+      // iPhone öffnet den DataChannel — wir reagieren auf ondatachannel
+      pc.ondatachannel = (event) => {
+        const dc = event.channel;
+        dc.binaryType = 'arraybuffer';
+        session.dc = dc;
+        setupReceiver(dc);
+      };
 
-        const client = new window.WebTorrent();
-        session.client = client;
+      // Hinweis nach 30 s ohne offer
+      setTimeout(() => {
+        if (pc.signalingState === 'stable' && !receivedMetadata && session && session.pc === pc) {
+          setStatus('Kein iPhone-Offer in 30 s — Cast auf iPhone gestartet, Code ' + code + ' korrekt?', 'err');
+          pairBtn.disabled = false;
+        }
+      }, 30000);
 
-        const opts = {
-          announce: [
-            'wss://tracker.openwebtorrent.com',
-            'wss://tracker.btorrent.xyz',
-            'wss://tracker.webtorrent.dev',
-          ],
-        };
+      function setupReceiver(dc) {
+        // State-Maschine: zuerst metadata (JSON-Text), dann optional init-segments
+        // (für fragmented MP4 via mp4box.js auf iPhone-Seite), dann media-segments
+        // oder rohe File-Chunks. Letzte Nachricht: { type: "done" }.
+        let metadata = null;
+        let mode = 'unknown'; // 'mse' | 'blob'
+        let mediaSource = null;
+        let sourceBuffer = null;
+        let bufferQueue = [];
+        let pendingSegmentMeta = null;
+        let blobChunks = [];
+        let videoElement = null;
 
-        client.on('error', (err) => {
-          loadingText.textContent = 'WebTorrent-Fehler';
-          loadingProgress.textContent = String(err.message || err);
-          reportStatus('error', String(err.message || err));
-        });
+        function flushQueue() {
+          if (!sourceBuffer || sourceBuffer.updating) return;
+          if (bufferQueue.length > 0) {
+            try {
+              sourceBuffer.appendBuffer(bufferQueue.shift());
+            } catch (e) {
+              setStatus('SourceBuffer-Fehler: ' + (e.message || e), 'err');
+              reportStatus('error', String(e.message || e));
+            }
+          }
+        }
 
-        client.add(meta.magnet, opts, (torrent) => {
-          session.torrent = torrent;
-          reportStatus('metadata');
-          loadingText.textContent = 'Puffert…';
-          // Größte Datei wählen (üblicherweise das Video)
-          const file = torrent.files.reduce((a, b) => (b.length > a.length ? b : a), torrent.files[0]);
-          // Video-Element erzeugen und streamen
+        function appendToSourceBuffer(buf) {
+          if (!sourceBuffer) {
+            bufferQueue.push(buf);
+            return;
+          }
+          if (sourceBuffer.updating || bufferQueue.length > 0) {
+            bufferQueue.push(buf);
+          } else {
+            try {
+              sourceBuffer.appendBuffer(buf);
+            } catch (e) {
+              bufferQueue.push(buf);
+            }
+          }
+        }
+
+        function buildVideoElement() {
+          stage.style.display = 'none';
+          player.classList.add('active');
+          overlayName.textContent = (metadata && metadata.name) || 'Stream';
+          loadingText.textContent = 'Initialisiere Player…';
+          loadingProgress.textContent = '';
+
           videoMount.innerHTML = '';
-          const v = document.createElement('video');
-          v.controls = true;
-          v.autoplay = true;
-          v.playsInline = true;
-          v.preload = 'auto';
-          videoMount.appendChild(v);
-          // renderTo nutzt render-media — entscheidet je nach Format
-          // zwischen MediaSource-Streaming und Blob-URL-Fallback.
-          file.renderTo(v, { autoplay: true, controls: true });
+          videoElement = document.createElement('video');
+          videoElement.controls = true;
+          videoElement.autoplay = true;
+          videoElement.playsInline = true;
+          videoElement.preload = 'auto';
+          videoMount.appendChild(videoElement);
 
-          v.addEventListener('canplay', () => {
+          videoElement.addEventListener('canplay', () => {
             loading.style.display = 'none';
             reportStatus('playing');
             tryFullscreen();
             requestWakeLock();
           });
-          v.addEventListener('waiting', () => { reportStatus('buffering'); });
-          v.addEventListener('playing', () => { reportStatus('playing'); });
-          v.addEventListener('error', () => {
-            const code = v.error ? v.error.code : 0;
+          videoElement.addEventListener('waiting', () => { reportStatus('buffering'); });
+          videoElement.addEventListener('playing', () => { reportStatus('playing'); });
+          videoElement.addEventListener('error', () => {
+            const c = videoElement.error ? videoElement.error.code : 0;
             loadingText.textContent = 'Wiedergabefehler';
-            loadingProgress.textContent = 'Code ' + code + ' — Codec evtl. nicht unterstützt.';
-            reportStatus('error', 'video error code ' + code);
+            loadingProgress.textContent = 'Code ' + c + ' — Codec evtl. nicht unterstützt.';
+            reportStatus('error', 'video error code ' + c);
           });
 
-          // Overlay nach kurzer Zeit ausblenden
           let overlayTimer;
           const showOverlay = () => {
             overlay.classList.remove('hide');
@@ -738,23 +746,112 @@
             overlayTimer = setTimeout(() => overlay.classList.add('hide'), 4000);
           };
           showOverlay();
-          v.addEventListener('mousemove', showOverlay);
-          v.addEventListener('click', showOverlay);
-          v.addEventListener('keydown', showOverlay);
+          videoElement.addEventListener('mousemove', showOverlay);
+          videoElement.addEventListener('click', showOverlay);
           window.addEventListener('keydown', showOverlay);
+        }
 
-          torrent.on('download', () => {
-            const pct = Math.round(torrent.progress * 100);
-            const dn = formatBytes(torrent.downloadSpeed) + '/s';
-            overlayStat.textContent = pct + '% · ↓ ' + dn;
-            if (loading.style.display !== 'none') {
-              loadingProgress.textContent = formatBytes(torrent.downloaded) + ' / ' + formatBytes(file.length) + ' · ↓ ' + dn;
+        function setupMSE(mime) {
+          mediaSource = new MediaSource();
+          videoElement.src = URL.createObjectURL(mediaSource);
+          mediaSource.addEventListener('sourceopen', () => {
+            try {
+              sourceBuffer = mediaSource.addSourceBuffer(mime);
+              sourceBuffer.addEventListener('updateend', flushQueue);
+              flushQueue();
+            } catch (e) {
+              setStatus('MSE addSourceBuffer fehlgeschlagen für "' + mime + '" — schalte auf Blob-Fallback.', 'err');
+              fallbackToBlob();
             }
           });
-          torrent.on('done', () => {
-            overlayStat.textContent = 'vollständig geladen';
-          });
-        });
+        }
+
+        function fallbackToBlob() {
+          mode = 'blob';
+          // Buffer-Queue + bisherige sourceBuffer-Inhalte zu blobChunks transferieren
+          mediaSource = null;
+          sourceBuffer = null;
+          for (const b of bufferQueue) blobChunks.push(b);
+          bufferQueue = [];
+        }
+
+        function finalize() {
+          if (mode === 'mse' && mediaSource && mediaSource.readyState === 'open') {
+            // Auf updateend warten und dann endOfStream
+            const tryEnd = () => {
+              if (sourceBuffer && (sourceBuffer.updating || bufferQueue.length > 0)) {
+                setTimeout(tryEnd, 100);
+                return;
+              }
+              try { mediaSource.endOfStream(); } catch {}
+            };
+            tryEnd();
+          } else if (mode === 'blob') {
+            const blob = new Blob(blobChunks, { type: (metadata && metadata.mime) || 'video/mp4' });
+            const url = URL.createObjectURL(blob);
+            videoElement.src = url;
+            videoElement.play().catch(() => {});
+            blobChunks = [];
+          }
+        }
+
+        dc.onmessage = (msg) => {
+          if (typeof msg.data === 'string') {
+            try {
+              const obj = JSON.parse(msg.data);
+              if (obj.type === 'metadata') {
+                metadata = obj;
+                receivedMetadata = true;
+                totalBytes = obj.size || 0;
+                reportStatus('metadata');
+                buildVideoElement();
+                setStatus('Empfange Stream — 0%…', 'ok');
+              } else if (obj.type === 'init') {
+                // mp4box-Init-Segment kommt gleich als nächste binary message
+                pendingSegmentMeta = obj;
+                if (window.MediaSource && MediaSource.isTypeSupported(obj.mime)) {
+                  mode = 'mse';
+                  setupMSE(obj.mime);
+                } else {
+                  // MSE unterstützt diese MIME nicht — Blob-Fallback
+                  setStatus('MSE unterstützt "' + obj.mime + '" nicht — Blob-Fallback (RAM-intensiv).', 'err');
+                  fallbackToBlob();
+                }
+              } else if (obj.type === 'segment') {
+                pendingSegmentMeta = obj;
+              } else if (obj.type === 'done') {
+                finalize();
+              }
+            } catch {}
+          } else {
+            // Binary chunk
+            const buf = msg.data; // ArrayBuffer
+            bytesReceived += buf.byteLength;
+            if (mode === 'mse') {
+              appendToSourceBuffer(buf);
+            } else if (mode === 'blob') {
+              blobChunks.push(buf);
+            } else {
+              // Noch kein Mode bestimmt: sammle vorerst als Blob,
+              // entscheiden wir später beim ersten init oder done.
+              blobChunks.push(buf);
+            }
+            // Loading-Progress aktualisieren
+            if (loading.style.display !== 'none' && totalBytes) {
+              const pct = Math.round((bytesReceived / totalBytes) * 100);
+              loadingText.textContent = 'Empfange Stream…';
+              loadingProgress.textContent = pct + '% · ' + formatBytes(bytesReceived) + ' / ' + formatBytes(totalBytes);
+            }
+          }
+        };
+
+        dc.onclose = () => {
+          // Bei rohen Chunks (kein init) erst beim Schließen Blob bauen
+          if (mode === 'unknown' && blobChunks.length > 0) {
+            mode = 'blob';
+            finalize();
+          }
+        };
       }
     }
 
