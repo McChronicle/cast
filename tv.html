@@ -357,7 +357,7 @@
     <div class="pair-card" id="pairCard">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span>Beam · TV · v13</span>
+        <span>Beam · TV · v14</span>
       </div>
       <h1>Mit dem <em>iPhone</em> verbinden.</h1>
       <p class="lede">QR-Code mit der iPhone-Kamera scannen — Beam öffnet sich automatisch mit diesem TV verbunden.</p>
@@ -479,28 +479,21 @@
     const urlCode = (new URLSearchParams(window.location.search).get('code') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
     let activeCode = '';
     if (urlCode.length === 6) {
-      // Code wurde vom iPhone vorgegeben — kein QR nötig
+      // Code wurde vom iPhone vorgegeben — TV ist Client (verbindet sich zum iPhone)
       qrBlock.style.display = 'none';
       codeInput.value = urlCode;
       pairBtn.disabled = false;
       activeCode = urlCode;
-      // Auto-Connect mit kleinem Delay
-      setTimeout(() => connect(urlCode), 400);
+      setTimeout(() => connect(urlCode, false), 400);
     } else {
-      // QR-Modus: TV erzeugt eigenen Code, zeigt QR, tritt selbst dem Room bei
+      // QR-Modus: TV erzeugt Code, zeigt QR und ist PeerJS-Host (wartet auf iPhone)
       activeCode = genCode();
       showQr(activeCode);
-      // Asynchron starten, damit das UI erst gerendert wird
-      setTimeout(() => connect(activeCode), 100);
+      setTimeout(() => connect(activeCode, true), 100);
     }
 
-    pairBtn.addEventListener('click', () => connect(codeInput.value));
-
-    // Auto-Connect, falls Code via URL kam
-    if (urlCode.length === 6) {
-      // Kleine Verzögerung, damit der Nutzer den Code-Vorbelegungs-Effekt sieht
-      setTimeout(() => connect(urlCode), 400);
-    }
+    // Manuelle Eingabe = Code kommt vom iPhone → TV ist Client
+    pairBtn.addEventListener('click', () => connect(codeInput.value, false));
 
     const scriptCache = new Map();
     function loadScript(src) {
@@ -587,7 +580,7 @@
       session = null;
     }
 
-    async function connect(code) {
+    async function connect(code, meIsHost) {
       // Falls schon eine Session läuft (z. B. QR-Auto + manueller Override),
       // erst sauber abbauen, dann neu verbinden.
       disconnectSession();
@@ -606,57 +599,88 @@
 
       setStatus('Verbinde zu Pairing-Server…');
 
-      const hostId = 'beam-' + code.toLowerCase();
-      // Anonyme ID — der TV ist Client, Host-ID ist die Code-basierte
-      const peer = new window.Peer({ debug: 1 });
+      const peerId = 'beam-' + code.toLowerCase();
+      // Wer den Code generiert hat = Host. Code-Konsument = Client.
+      const peer = meIsHost
+        ? new window.Peer(peerId, { debug: 1 })
+        : new window.Peer({ debug: 1 });
       let conn = null;
       let gotMagnet = false;
+      let connectAttempts = 0;
       session = { peer, conn: null, client: null, torrent: null };
       reportStatus = (state, detail) => {
         try { conn && conn.open && conn.send({ state, detail }); } catch {}
       };
 
-      peer.on('open', () => {
-        setStatus('Verbinde zu iPhone (Code ' + code + ')…', 'ok');
-        conn = peer.connect(hostId, { reliable: true });
-        session.conn = conn;
-        conn.on('open', () => {
+      function attachConn(c) {
+        conn = c;
+        session.conn = c;
+        c.on('open', () => {
           setStatus('iPhone verbunden — warte auf Magnet…', 'ok');
         });
-        conn.on('data', (msg) => {
+        c.on('data', (msg) => {
           if (!msg || typeof msg !== 'object' || !msg.magnet) return;
           gotMagnet = true;
           setStatus('Magnet erhalten — starte Stream…', 'ok');
           startTorrent(msg);
         });
-        conn.on('error', (err) => {
+        c.on('error', (err) => {
           setStatus('Verbindungsfehler: ' + (err && err.type || err), 'err');
           pairBtn.disabled = false;
         });
-        conn.on('close', () => {
+        c.on('close', () => {
           if (!gotMagnet) setStatus('iPhone hat verbindung getrennt.', 'err');
         });
+      }
+
+      function tryConnect() {
+        if (!session || session.peer !== peer) return;
+        connectAttempts++;
+        setStatus('Verbinde zu iPhone (Code ' + code + ', Versuch ' + connectAttempts + ')…', 'ok');
+        attachConn(peer.connect(peerId, { reliable: true }));
+      }
+
+      peer.on('open', () => {
+        if (meIsHost) {
+          setStatus('Bereit als Code ' + code + ' — warte auf iPhone.', 'ok');
+        } else {
+          tryConnect();
+        }
+      });
+
+      peer.on('connection', (c) => {
+        if (!meIsHost) return; // wir sind Client, sollte nicht passieren
+        setStatus('iPhone verbindet sich…', 'ok');
+        attachConn(c);
       });
 
       peer.on('error', (err) => {
         const t = err && err.type;
-        let msg;
-        if (t === 'peer-unavailable') {
-          msg = 'iPhone mit Code ' + code + ' nicht gefunden. Sender öffnen, Cast starten.';
+        if (t === 'peer-unavailable' && !meIsHost) {
+          // iPhone ist noch nicht da — nach 2 s erneut versuchen, max 30 s
+          if (connectAttempts < 15) {
+            setStatus('iPhone noch nicht da — warte (Versuch ' + connectAttempts + '/15)…');
+            setTimeout(() => {
+              if (session && session.peer === peer && !gotMagnet) tryConnect();
+            }, 2000);
+            return;
+          }
+          setStatus('iPhone mit Code ' + code + ' nicht gefunden. Cast auf dem iPhone starten.', 'err');
+        } else if (t === 'unavailable-id' && meIsHost) {
+          setStatus('Code ' + code + ' belegt — Seite neu laden für anderen Code.', 'err');
         } else {
-          msg = 'PeerJS-Fehler: ' + (t || err.message || err);
+          setStatus('PeerJS-Fehler: ' + (t || err.message || err), 'err');
         }
-        setStatus(msg, 'err');
         pairBtn.disabled = false;
       });
 
-      // Hinweis nach 30 s, falls bis dahin nichts passiert ist
+      // Hinweis nach 60 s, falls bis dahin nichts passiert ist
       setTimeout(() => {
         if (!gotMagnet && session && session.peer === peer) {
-          setStatus('Kein Magnet in 30 s. iPhone Cast starten oder Code prüfen.', 'err');
+          setStatus('Kein Magnet in 60 s. iPhone Cast starten oder Code prüfen.', 'err');
           pairBtn.disabled = false;
         }
-      }, 30000);
+      }, 60000);
 
       function startTorrent(meta) {
         stage.style.display = 'none';
